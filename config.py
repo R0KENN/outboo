@@ -25,6 +25,16 @@ class Settings(BaseSettings):
 
     throttle_rate: float = Field(default=0.7, alias="THROTTLE_RATE")
 
+    bot_admins: str = Field(default="", alias="BOT_ADMINS")
+
+    @property
+    def admin_ids(self) -> set[int]:
+        """Множество id владельцев бота (для команд в личке)."""
+        return {
+            int(x) for x in self.bot_admins.replace(" ", "").split(",")
+            if x.strip().lstrip("-").isdigit()
+        }
+
     @property
     def database_url(self) -> str:
         """Возвращает async-DSN в зависимости от выбранного драйвера."""

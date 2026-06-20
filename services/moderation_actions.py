@@ -18,6 +18,14 @@ from database.crud import get_or_create_chat_settings
 logger = logging.getLogger(__name__)
 
 
+# Какие действия отражаем в статистике и под какой метрикой
+_STAT_METRIC = {
+    "ban": "bans",
+    "mute": "mutes",
+    "warn": "warns",
+}
+
+
 async def log_action(
     session: AsyncSession,
     chat_id: int,
@@ -26,7 +34,7 @@ async def log_action(
     target_id: int,
     reason: str = "",
 ) -> None:
-    """Записывает модераторское действие в журнал."""
+    """Записывает модераторское действие в журнал и обновляет статистику."""
     entry = ModerationLog(
         chat_id=chat_id,
         action=action,
@@ -36,6 +44,12 @@ async def log_action(
     )
     session.add(entry)
     await session.commit()
+
+    # Счётчик статистики (только для ключевых действий)
+    metric = _STAT_METRIC.get(action)
+    if metric:
+        from database import crud
+        await crud.bump_stat(session, chat_id, metric)
 
 
 async def ban_user(

@@ -6,6 +6,7 @@ from aiogram.types import Message
 
 from datetime import datetime, timezone
 from database.crud import get_or_create_chat_settings, get_join_time
+from database import crud
 from database.engine import session_factory
 from services import antispam
 from services.antiflood import flood_tracker
@@ -76,6 +77,7 @@ async def moderate_message(
         if cfg.antispam_enabled and await antispam.check_spam(session, message, chat_id):
             try:
                 await message.delete()
+                await crud.bump_stat(session, chat_id, "deleted_spam")
             except Exception as e:
                 logger.warning("Не удалось удалить спам: %s", e)
             return
@@ -84,6 +86,7 @@ async def moderate_message(
         if cfg.antimat_enabled and await antispam.check_profanity(session, message, chat_id):
             try:
                 await message.delete()
+                await crud.bump_stat(session, chat_id, "deleted_profanity")
                 count, limit, triggered = await add_warn(
                     message.bot, session, chat_id, user_id,
                     message.bot.id, "profanity",
@@ -101,3 +104,6 @@ async def moderate_message(
             except Exception as e:
                 logger.warning("Ошибка антимата: %s", e)
             return
+
+        # 4. Учёт активности (сообщение прошло все фильтры)
+        await crud.bump_stat(session, chat_id, "messages")

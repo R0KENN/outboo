@@ -8,6 +8,7 @@ from aiogram.types import (
 )
 
 from database.crud import get_or_create_chat_settings, record_join
+from database import crud
 from database.engine import session_factory
 from services import captcha as cap
 
@@ -89,9 +90,10 @@ async def on_member_update(event: ChatMemberUpdated) -> None:
         return
 
     chat_id = event.chat.id
-        # Фиксируем время входа для карантина новичков
+    # Фиксируем время входа для карантина новичков и считаем статистику
     async with session_factory() as session:
         await record_join(session, chat_id, user.id)
+        await crud.bump_stat(session, chat_id, "new_members")
     async with session_factory() as session:
         cfg = await get_or_create_chat_settings(session, chat_id)
 
