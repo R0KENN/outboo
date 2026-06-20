@@ -1,0 +1,175 @@
+"""Действия модерации: бан, мут, кик, варн (раздел 4.1 ТЗ).
+
+Вся бизнес-логика наказаний собрана здесь. Хендлеры только вызывают
+эти функции. Каждое действие пишется в moderation_log.
+"""
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+
+from aiogram import Bot
+from aiogram.types import ChatPermissions
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from database.models import ModerationLog, Warn
+from database.crud import get_or_create_chat_settings
+
+logger = logging.getLogger(__name__)
+
+
+async def log_action(
+    session: AsyncSession,
+    chat_id: int,
+    action: str,
+    actor_id: int,
+    target_id: int,
+    reason: str = "",
+) -> None:
+    """Записывает модераторское действие в журнал."""
+    entry = ModerationLog(
+        chat_id=chat_id,
+        action=action,
+        actor_id=actor_id,
+        target_id=target_id,
+        reason=reason,
+    )
+    session.add(entry)
+    await session.commit()
+
+
+async def ban_user(
+    bot: Bot, session: AsyncSession,
+    chat_id: int, user_id: int, actor_id: int, reason: str = "",
+) -> None:
+    """Банит (удаляет и блокирует) участника."""
+    await bot.ban_chat_member(chat_id, user_id)
+    await log_action(session, chat_id, "ban", actor_id, user_id, reason)
+
+
+async def unban_user(
+    bot: Bot, session: AsyncSession,
+    chat_id: int, user_id: int, actor_id: int,
+) -> None:
+    """Снимает блокировку участника."""
+    await bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
+    await log_action(session, chat_id, "unban", actor_id, user_id)
+
+
+async def kick_user(
+    bot: Bot, session: AsyncSession,
+    chat_id: int, user_id: int, actor_id: int, reason: str = "",
+) -> None:
+    """Кик: бан с немедленным разбаном, чтобы участник мог вернуться."""
+    await bot.ban_chat_member(chat_id, user_id)
+    await bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
+    await log_action(session, chat_id, "kick", actor_id, user_id, reason)
+
+
+async def mute_user(
+    bot: Bot, session: AsyncSession,
+    chat_id: int, user_id: int, actor_id: int,
+    seconds: int, reason: str = "",
+) -> None:
+    """Временно лишает участника права писать."""
+    until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    await bot.restrict_chat_member(
+        chat_id, user_id,
+        permissions=ChatPermissions(can_send_messages=False),
+        until_date=until,
+    )
+    await log_action(session, chat_id, "mute", actor_id, user_id, reason)
+
+
+async def unmute_user(
+    bot: Bot, session: AsyncSession,
+    chat_id: int, user_id: int, actor_id: int,
+) -> None:
+    """Возвращает участнику право писать."""
+    await bot.restrict_chat_member(
+        chat_id, user_id,
+        permissions=ChatPermissions(
+            can_send_messages=True,
+            can_send_audios=True,
+            can_send_documents=True,
+            can_send_photos=True,
+            can_send_videos=True,
+            can_send_video_notes=True,
+            can_send_voice_notes=True,
+            can_send_polls=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
+        ),
+    )
+    await log_action(session, chat_id, "unmute", actor_id, user_id)
+
+
+async def add_warn(
+    bot: Bot, session: AsyncSession,
+    chat_id: int, user_id: int, actor_id: int, reason: str = "",
+) -> tuple[int, int, bool]:
+    """Выдаёт варн. Возвращает (текущее_число, порог, сработало_ли_действие).
+
+    При достижении порога автоматически применяет действие из настроек
+    (мут или бан) и сбрасывает счётчик.
+    """
+    chat_settings = await get_or_create_chat_settings(session, chat_id)
+
+    stmt = select(Warn).where(Warn.chat_id == chat_id, Warn.user_id == user_id)
+    warn = (await session.execute(stmt)).scalar_one_or_none()
+    if warn is None:
+        warn = Warn(chat_id=chat_id, user_id=user_id, count=0, history="[]")
+        session.add(warn)
+
+    warn.count += 1
+    # Дописываем запись в историю выдачи
+    try:
+        history = json.loads(warn.history or "[]")
+    except (ValueError, TypeError):
+        history = []
+    history.append({
+        "actor": actor_id,
+        "reason": reason,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    warn.history = json.dumps(history, ensure_ascii=False)
+
+    await log_action(session, chat_id, "warn", actor_id, user_id, reason)
+
+    limit = chat_settings.warn_limit
+    triggered = False
+    if warn.count >= limit:
+        triggered = True
+        if chat_settings.warn_action == "ban":
+            await ban_user(bot, session, chat_id, user_id, actor_id, "warn limit")
+        else:
+            await mute_user(
+                bot, session, chat_id, user_id, actor_id,
+                chat_settings.flood_mute_seconds, "warn limit",
+            )
+        warn.count = 0  # сброс после автодействия
+
+    await session.commit()
+    return warn.count, limit, triggered
+
+
+async def remove_warn(
+    session: AsyncSession, chat_id: int, user_id: int,
+) -> int:
+    """Снимает один варн. Возвращает оставшееся количество."""
+    stmt = select(Warn).where(Warn.chat_id == chat_id, Warn.user_id == user_id)
+    warn = (await session.execute(stmt)).scalar_one_or_none()
+    if warn is None or warn.count == 0:
+        return 0
+    warn.count -= 1
+    await session.commit()
+    return warn.count
+
+
+async def get_warns(
+    session: AsyncSession, chat_id: int, user_id: int,
+) -> int:
+    """Возвращает текущее число варнов участника."""
+    stmt = select(Warn).where(Warn.chat_id == chat_id, Warn.user_id == user_id)
+    warn = (await session.execute(stmt)).scalar_one_or_none()
+    return warn.count if warn else 0

@@ -1,0 +1,160 @@
+"""Панель настроек чата на inline-кнопках (раздел 4.4 ТЗ).
+
+Команда /settings открывает меню. Нажатия обрабатываются по callback_data
+вида set:<действие>:<поле>:<chat_id>. Доступ — только администраторам.
+"""
+import logging
+
+from aiogram import F, Router
+from aiogram.enums import ChatMemberStatus
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, Message
+
+from database.crud import get_or_create_chat_settings
+from database.engine import session_factory
+from keyboards.settings_kb import main_settings_kb, params_kb
+
+logger = logging.getLogger(__name__)
+router = Router(name="settings")
+
+# Границы значений, чтобы кнопками нельзя было выставить абсурд
+LIMITS = {
+    "warn_limit": (1, 10),
+    "flood_messages": (2, 30),
+    "flood_seconds": (1, 60),
+    "captcha_timeout": (30, 600),
+}
+STEP = {
+    "warn_limit": 1,
+    "flood_messages": 1,
+    "flood_seconds": 1,
+    "captcha_timeout": 30,
+}
+
+
+async def _is_admin(message_or_cb, chat_id: int, user_id: int) -> bool:
+    """Проверяет, что пользователь — администратор чата."""
+    try:
+        member = await message_or_cb.bot.get_chat_member(chat_id, user_id)
+        return member.status in (
+            ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+        )
+    except Exception:
+        return False
+
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message) -> None:
+    """Открывает панель настроек. Работает только в группах и только у админа."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("Настройки доступны внутри группы.")
+        return
+    if not await _is_admin(message, message.chat.id, message.from_user.id):
+        await message.answer("Панель настроек доступна только администраторам.")
+        return
+
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, message.chat.id)
+        kb = main_settings_kb(cfg)
+    await message.answer("⚙️ <b>Настройки чата</b>\nНажмите, чтобы переключить:", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("set:"))
+async def on_settings_callback(callback: CallbackQuery) -> None:
+    """Обрабатывает все нажатия в панели настроек."""
+    parts = callback.data.split(":")
+    action = parts[1]
+
+    if action == "noop":
+        await callback.answer()
+        return
+
+    # Последний элемент callback_data — всегда chat_id
+    chat_id = int(parts[-1])
+
+    # Защита: переключать настройки может только админ этого чата
+    if not await _is_admin(callback, chat_id, callback.from_user.id):
+        await callback.answer("Только для администраторов.", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, chat_id)
+
+        if action == "toggle":
+            field = parts[2]
+            setattr(cfg, field, not getattr(cfg, field))
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=main_settings_kb(cfg))
+            await callback.answer("Сохранено.")
+
+        elif action in ("inc", "dec"):
+            field = parts[2]
+            lo, hi = LIMITS[field]
+            step = STEP[field] * (1 if action == "inc" else -1)
+            new_val = max(lo, min(hi, getattr(cfg, field) + step))
+            setattr(cfg, field, new_val)
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))
+            await callback.answer(f"{field} = {new_val}")
+
+        elif action == "warnaction":
+            cfg.warn_action = "ban" if cfg.warn_action == "mute" else "mute"
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))
+            await callback.answer(f"Действие: {cfg.warn_action}")
+
+        elif action == "captchatype":
+            cfg.captcha_type = "math" if cfg.captcha_type == "button" else "button"
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))
+            await callback.answer(f"Тип капчи: {cfg.captcha_type}")
+
+        elif action == "params":
+            await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))
+            await callback.answer()
+
+        elif action == "refresh":
+            await callback.message.edit_text(
+                "⚙️ <b>Настройки чата</b>\nНажмите, чтобы переключить:",
+                reply_markup=main_settings_kb(cfg),
+            )
+            await callback.answer()
+
+@router.message(Command("setwelcome"))
+async def cmd_set_welcome(message: Message) -> None:
+    """Задаёт текст приветствия. Используйте {name} для подстановки имени."""
+    if not await _is_admin(message, message.chat.id, message.from_user.id):
+        return
+    # Берём текст после команды
+    text = message.text.partition(" ")[2].strip()
+    if not text:
+        await message.answer(
+            "Укажите текст после команды.\n"
+            "Пример: /setwelcome Привет, {name}! Читай правила."
+        )
+        return
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, message.chat.id)
+        cfg.welcome_text = text
+        await session.commit()
+    await message.answer("Текст приветствия обновлён.")
+
+
+@router.message(Command("setrules"))
+async def cmd_set_rules(message: Message) -> None:
+    """Задаёт текст правил, который добавляется к приветствию."""
+    if not await _is_admin(message, message.chat.id, message.from_user.id):
+        return
+    text = message.text.partition(" ")[2].strip()
+    if not text:
+        await message.answer("Укажите текст правил после команды.")
+        return
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, message.chat.id)
+        cfg.rules_text = text
+        await session.commit()
+    await message.answer("Правила обновлены.")

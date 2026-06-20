@@ -1,0 +1,115 @@
+"""Фильтрация контента: антиспам (ссылки/форварды) и антимат (раздел 4.1)."""
+import re
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from aiogram.types import Message
+from database.models import AllowedDomain, StopWord
+
+# Регулярка для поиска ссылок и упоминаний
+URL_PATTERN = re.compile(
+    r"(https?://\S+|www\.\S+|t\.me/\S+|@[a-zA-Z][a-zA-Z0-9_]{4,})",
+    re.IGNORECASE,
+)
+DOMAIN_PATTERN = re.compile(r"(?:https?://)?(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})")
+
+# Таблица для нормализации обхода антимата (leet и латиница→кириллица)
+LEET_MAP = str.maketrans({
+    "0": "о", "o": "о", "0": "о", "@": "а", "a": "а", "4": "ч",
+    "3": "е", "e": "е", "1": "и", "!": "и", "c": "с", "p": "р",
+    "x": "х", "y": "у", "k": "к", "h": "н", "b": "в", "t": "т",
+    "m": "м", "$": "с", "6": "б", "9": "д",
+})
+
+
+async def get_allowed_domains(session: AsyncSession, chat_id: int) -> set[str]:
+    """Белый список доменов чата."""
+    stmt = select(AllowedDomain.domain).where(AllowedDomain.chat_id == chat_id)
+    rows = (await session.execute(stmt)).scalars().all()
+    return {d.lower() for d in rows}
+
+
+async def get_stopwords(session: AsyncSession, chat_id: int) -> list[str]:
+    """Словарь стоп-слов чата."""
+    stmt = select(StopWord.word).where(StopWord.chat_id == chat_id)
+    return [w.lower() for w in (await session.execute(stmt)).scalars().all()]
+
+
+def normalize_text(text: str) -> str:
+    """Снимает простые приёмы обхода: разделители между буквами и leet-замены.
+
+    Например 'с п а м' и 'сп@м' приводятся к виду, сравнимому со стоп-словом.
+    """
+    lowered = text.lower()
+    # Убираем разделители между одиночными буквами: "с п а м" -> "спам"
+    lowered = re.sub(r"(?<=\w)[\s._\-*]+(?=\w)", "", lowered)
+    # Применяем карту leet-замен
+    lowered = lowered.translate(LEET_MAP)
+    # Схлопываем повторяющиеся буквы: "спааам" -> "спам"
+    lowered = re.sub(r"(.)\1{2,}", r"\1", lowered)
+    return lowered
+
+
+def contains_link(message: Message) -> bool:
+    """Проверяет, есть ли в сообщении ссылка/упоминание канала."""
+    text = (message.text or message.caption or "")
+    if URL_PATTERN.search(text):
+        return True
+    # Ссылки могут быть и в entities (например, скрытые в тексте)
+    entities = (message.entities or []) + (message.caption_entities or [])
+    for ent in entities:
+        if ent.type in ("url", "text_link", "mention"):
+            return True
+    return False
+
+
+def is_forwarded(message: Message) -> bool:
+    """Проверяет, переслано ли сообщение из другого чата/канала."""
+    return bool(
+        message.forward_origin
+        or getattr(message, "forward_from", None)
+        or getattr(message, "forward_from_chat", None)
+    )
+
+
+def extract_domains(text: str) -> set[str]:
+    """Извлекает домены из текста для сверки с белым списком."""
+    return {m.group(1).lower() for m in DOMAIN_PATTERN.finditer(text)}
+
+
+async def check_spam(
+    session: AsyncSession, message: Message, chat_id: int,
+) -> bool:
+    """True, если сообщение нужно удалить как спам.
+
+    Ссылка разрешена, только если все её домены в белом списке.
+    """
+    if is_forwarded(message):
+        return True
+    if contains_link(message):
+        text = (message.text or message.caption or "")
+        domains = extract_domains(text)
+        allowed = await get_allowed_domains(session, chat_id)
+        # @-упоминания доменов не имеют — считаем спамом, если нет домена
+        if not domains:
+            return True
+        # Если хотя бы один домен вне белого списка — спам
+        if not domains.issubset(allowed):
+            return True
+    return False
+
+
+async def check_profanity(
+    session: AsyncSession, message: Message, chat_id: int,
+) -> bool:
+    """True, если в сообщении есть стоп-слово (с учётом обхода)."""
+    text = (message.text or message.caption or "")
+    if not text:
+        return False
+    normalized = normalize_text(text)
+    stopwords = await get_stopwords(session, chat_id)
+    for word in stopwords:
+        if word and word in normalized:
+            return True
+    return False
