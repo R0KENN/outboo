@@ -98,6 +98,13 @@ async def get_post(session: AsyncSession, post_id: int) -> ScheduledPost | None:
     """Возвращает пост по id."""
     return await session.get(ScheduledPost, post_id)
 
+async def get_post(session, post_id: int):
+    """Возвращает запланированный пост по id или None."""
+    from database.models import ScheduledPost
+    from sqlalchemy import select
+    return (await session.execute(
+        select(ScheduledPost).where(ScheduledPost.id == post_id)
+    )).scalar_one_or_none()
 
 async def list_pending_posts(
     session: AsyncSession, created_by: int | None = None

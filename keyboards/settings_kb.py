@@ -133,6 +133,10 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
               else "📚 Режим: все сразу"),
         callback_data=f"set:reactmode:{cid}",
     ))
+    b.row(InlineKeyboardButton(
+        text=f"{_mark(cfg.autoreact_join_custom)} Подхватывать кастом-эмодзи",
+        callback_data=f"set:toggle:autoreact_join_custom:{cid}",
+    ))
 
     # Сетка эмодзи по 5 в ряд; выбранные помечаются точкой
     row_buttons = []

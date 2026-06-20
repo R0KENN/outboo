@@ -43,6 +43,10 @@ def _cancel_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")
     ]])
 
+class RescheduleFSM(StatesGroup):
+    """Ожидание новой даты при переносе из карточки очереди."""
+    waiting_time = State()        # перенос одного поста
+    waiting_time_batch = State()  # перенос всей группы
 
 # ──────────────────────────────────────────────────────────────────────────
 # Выбор каналов (мультивыбор из managed_chats)
@@ -503,45 +507,327 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
 # ──────────────────────────────────────────────────────────────────────────
 # Управление очередью
 # ──────────────────────────────────────────────────────────────────────────
-@router.message(Command("queue"))
-async def cmd_queue(message: Message) -> None:
-    """Показывает запланированные посты, мультиканальные — одной группой."""
-    async with session_factory() as session:
-        groups = await crud.list_pending_grouped(session)
-
-    if not groups:
-        await message.answer("Очередь пуста.")
-        return
-
-    lines = ["📋 <b>Запланированные посты:</b>\n"]
+# ──────────────────────────────────────────────────────────────────────────
+# Управление очередью (инлайн-вкладка)
+# ──────────────────────────────────────────────────────────────────────────
+def _queue_list_kb(groups) -> InlineKeyboardMarkup:
+    """Список запланированных постов кнопками."""
+    b = InlineKeyboardBuilder()
     for grp in groups:
         first = grp[0]
-        preview = (first.text or "").replace("\n", " ")[:40] or "(медиа без текста)"
+        preview = (first.text or "").replace("\n", " ")[:25] or "(медиа)"
         when = to_local_str(first.publish_at)
-
-        if len(grp) == 1 and not first.batch_id:
-            lines.append(
-                f"#{first.id} — {when} → <code>{first.channel_id}</code>\n   {preview}"
-            )
-        elif len(grp) == 1:
-            lines.append(
-                f"#{first.id} — {when} → 1 канал\n   {preview}\n"
-                f"   отмена группы: /cancelbatch {first.batch_id[:8]}"
-            )
+        if len(grp) > 1:
+            label = f"🗂 {when} · {len(grp)} кан. · {preview}"
+            cb = f"q:batch:{first.batch_id}"
         else:
-            ids_str = ", ".join(f"#{p.id}" for p in grp)
-            lines.append(
-                f"🗂 {when} → <b>{len(grp)} каналов</b> ({ids_str})\n   {preview}\n"
-                f"   отмена группы: /cancelbatch {first.batch_id[:8]}"
-            )
-
-    lines.append(
-        "\nОтмена одного: /cancelpost &lt;id&gt;"
-        "\nОтмена группы: /cancelbatch &lt;код&gt;"
-        "\nПеренос: /repost &lt;id&gt; ДД.ММ.ГГГГ ЧЧ:ММ"
+            label = f"📄 {when} · {preview}"
+            cb = f"q:post:{first.id}"
+        b.row(InlineKeyboardButton(text=label, callback_data=cb))
+    b.row(
+        InlineKeyboardButton(text="➕ Новый пост", callback_data="q:new"),
+        InlineKeyboardButton(text="🔄 Обновить", callback_data="q:refresh"),
     )
-    await message.answer("\n".join(lines))
+    b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
+    return b.as_markup()
 
+
+def _post_card_kb(post_id: int) -> InlineKeyboardMarkup:
+    """Карточка одного поста."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🕐 Перенести", callback_data=f"q:resched:{post_id}"))
+    b.row(InlineKeyboardButton(text="🗑 Отменить", callback_data=f"q:cancel:{post_id}"))
+    b.row(InlineKeyboardButton(text="⬅️ К списку", callback_data="q:refresh"))
+    return b.as_markup()
+
+
+def _batch_card_kb(batch_id: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="🕐 Перенести группу", callback_data=f"q:reschedbatch:{batch_id}"))
+    b.row(InlineKeyboardButton(
+        text="🗑 Отменить всю группу", callback_data=f"q:cancelbatch:{batch_id}"))
+    b.row(InlineKeyboardButton(text="⬅️ К списку", callback_data="q:refresh"))
+    return b.as_markup()
+
+
+async def _render_queue(target, edit: bool = False) -> None:
+    """Рисует список очереди (target — Message)."""
+    async with session_factory() as session:
+        groups = await crud.list_pending_grouped(session)
+    if not groups:
+        text = "📋 <b>Очередь пуста.</b>\n\nСоздайте первый отложенный пост:"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Новый пост", callback_data="q:new")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home")],
+        ])
+    else:
+        text = "📋 <b>Запланированные посты</b>\nНажмите на пост для управления:"
+        kb = _queue_list_kb(groups)
+    if edit:
+        try:
+            await target.edit_text(text, reply_markup=kb)
+            return
+        except Exception:
+            pass
+    await target.answer(text, reply_markup=kb)
+
+
+@router.message(Command("queue"))
+async def cmd_queue(message: Message) -> None:
+    """Открывает инлайн-вкладку очереди."""
+    await _render_queue(message)
+
+
+@router.callback_query(F.data == "q:refresh")
+async def cb_queue_refresh(callback: CallbackQuery) -> None:
+    await _render_queue(callback.message, edit=True)
+    await callback.answer()
+
+@router.callback_query(F.data == "q:new")
+async def cb_queue_new(callback: CallbackQuery, state: FSMContext) -> None:
+    """Запускает создание поста прямо из вкладки очереди."""
+    if callback.message.chat.type != "private":
+        await callback.answer(
+            "Создавать посты можно только в личке с ботом.", show_alert=True,
+        )
+        return
+    await start_channel_choice(
+        callback.message, state, user_id=callback.from_user.id, edit=True,
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("q:post:"))
+async def cb_queue_post(callback: CallbackQuery) -> None:
+    """Карточка одного поста."""
+    post_id = int(callback.data.split(":")[2])
+    async with session_factory() as session:
+        post = await crud.get_post(session, post_id)
+    if post is None or post.status != "pending":
+        await callback.answer("Пост уже не в очереди.", show_alert=True)
+        await _render_queue(callback.message, edit=True)
+        return
+    preview = (post.text or "").replace("\n", " ")[:200] or "(медиа без текста)"
+    text = (
+        f"📄 <b>Пост #{post.id}</b>\n"
+        f"Канал: <code>{post.channel_id}</code>\n"
+        f"Время: <b>{to_local_str(post.publish_at)}</b> (МСК)\n"
+        + (f"Автоудаление: {post.delete_after // 60} мин\n" if post.delete_after else "")
+        + f"\n{preview}\n\n"
+        f"Перенести: <code>/repost {post.id} ДД.ММ.ГГГГ ЧЧ:ММ</code>"
+    )
+    await callback.message.edit_text(text, reply_markup=_post_card_kb(post.id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("q:batch:"))
+async def cb_queue_batch(callback: CallbackQuery) -> None:
+    """Карточка мультиканальной группы."""
+    batch_id = callback.data.split(":", 2)[2]
+    async with session_factory() as session:
+        groups = await crud.list_pending_grouped(session)
+    grp = next((g for g in groups if g[0].batch_id == batch_id), None)
+    if not grp:
+        await callback.answer("Группа уже не в очереди.", show_alert=True)
+        await _render_queue(callback.message, edit=True)
+        return
+    first = grp[0]
+    preview = (first.text or "").replace("\n", " ")[:200] or "(медиа без текста)"
+    ids_str = ", ".join(f"#{p.id}" for p in grp)
+    text = (
+        f"🗂 <b>Группа из {len(grp)} постов</b> ({ids_str})\n"
+        f"Время: <b>{to_local_str(first.publish_at)}</b> (МСК)\n\n"
+        f"{preview}"
+    )
+    await callback.message.edit_text(text, reply_markup=_batch_card_kb(batch_id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("q:cancel:"))
+async def cb_queue_cancel(callback: CallbackQuery) -> None:
+    """Отмена одного поста из карточки."""
+    post_id = int(callback.data.split(":")[2])
+    async with session_factory() as session:
+        ok = await crud.cancel_post(session, post_id)
+    try:
+        sched.scheduler.remove_job(f"post:{post_id}")
+    except Exception:
+        pass
+    await callback.answer(f"Пост #{post_id} отменён." if ok else "Уже отменён.")
+    await _render_queue(callback.message, edit=True)
+
+
+@router.callback_query(F.data.startswith("q:cancelbatch:"))
+async def cb_queue_cancelbatch(callback: CallbackQuery) -> None:
+    """Отмена всей группы из карточки."""
+    batch_id = callback.data.split(":", 2)[2]
+    async with session_factory() as session:
+        cancelled = await crud.cancel_batch(session, batch_id)
+    for pid in cancelled:
+        try:
+            sched.scheduler.remove_job(f"post:{pid}")
+        except Exception:
+            pass
+    await callback.answer(f"Отменено постов: {len(cancelled)}.")
+    await _render_queue(callback.message, edit=True)
+
+@router.callback_query(F.data.startswith("q:resched:"))
+async def cb_queue_resched(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопка «Перенести»: запоминаем пост и ждём новую дату сообщением."""
+    post_id = int(callback.data.split(":")[2])
+
+    async with session_factory() as session:
+        post = await crud.get_post(session, post_id)
+    if post is None or post.status != "pending":
+        await callback.answer("Пост уже не в очереди.", show_alert=True)
+        await _render_queue(callback.message, edit=True)
+        return
+
+    await state.set_state(RescheduleFSM.waiting_time)
+    await state.update_data(resched_post_id=post_id)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:resched_cancel")
+    ]])
+    await callback.message.edit_text(
+        f"🕐 <b>Перенос поста #{post_id}</b>\n\n"
+        f"Текущее время: <b>{to_local_str(post.publish_at)}</b> (МСК)\n\n"
+        "Пришлите новую дату и время в формате\n"
+        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>, например 25.12.2025 18:30.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(RescheduleFSM.waiting_time, F.data == "q:resched_cancel")
+async def cb_resched_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    """Отмена переноса — возвращаемся к списку очереди."""
+    await state.clear()
+    await _render_queue(callback.message, edit=True)
+    await callback.answer("Перенос отменён.")
+
+
+@router.message(RescheduleFSM.waiting_time)
+async def step_resched_time(message: Message, state: FSMContext) -> None:
+    """Принимает новую дату и переносит пост."""
+    new_time = parse_publish_time(message.text or "")
+    if new_time is None:
+        await message.answer(
+            "Не разобрал время или оно в прошлом.\n"
+            "Формат: <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>, например 25.12.2025 18:30.\n"
+            "Или нажмите «Отмена» в сообщении выше."
+        )
+        return
+
+    data = await state.get_data()
+    post_id = data.get("resched_post_id")
+    await state.clear()
+
+    if not post_id:
+        await message.answer("Не нашёл пост для переноса. Откройте /queue заново.")
+        return
+
+    async with session_factory() as session:
+        ok = await crud.reschedule_post(session, post_id, new_time)
+
+    if not ok:
+        await message.answer(f"Пост #{post_id} не найден или уже не в очереди.")
+        return
+
+    await sched.schedule_post(post_id, new_time)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")
+    ]])
+    await message.answer(
+        f"✅ Пост #{post_id} перенесён на <b>{to_local_str(new_time)}</b> (МСК).",
+        reply_markup=kb,
+    )
+
+@router.callback_query(F.data.startswith("q:reschedbatch:"))
+async def cb_queue_reschedbatch(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопка «Перенести группу»: запоминаем batch_id и ждём новую дату."""
+    batch_id = callback.data.split(":", 2)[2]
+
+    async with session_factory() as session:
+        groups = await crud.list_pending_grouped(session)
+    grp = next((g for g in groups if g[0].batch_id == batch_id), None)
+    if not grp:
+        await callback.answer("Группа уже не в очереди.", show_alert=True)
+        await _render_queue(callback.message, edit=True)
+        return
+
+    await state.set_state(RescheduleFSM.waiting_time_batch)
+    await state.update_data(resched_batch_id=batch_id)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:resched_cancel")
+    ]])
+    first = grp[0]
+    await callback.message.edit_text(
+        f"🕐 <b>Перенос группы из {len(grp)} постов</b>\n\n"
+        f"Текущее время: <b>{to_local_str(first.publish_at)}</b> (МСК)\n\n"
+        "Пришлите новую дату и время в формате\n"
+        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>, например 25.12.2025 18:30.\n"
+        "Все посты группы будут перенесены на это время.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(RescheduleFSM.waiting_time_batch, F.data == "q:resched_cancel")
+async def cb_reschedbatch_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    """Отмена переноса группы — возврат к списку."""
+    await state.clear()
+    await _render_queue(callback.message, edit=True)
+    await callback.answer("Перенос отменён.")
+
+
+@router.message(RescheduleFSM.waiting_time_batch)
+async def step_reschedbatch_time(message: Message, state: FSMContext) -> None:
+    """Принимает новую дату и переносит все посты группы."""
+    new_time = parse_publish_time(message.text or "")
+    if new_time is None:
+        await message.answer(
+            "Не разобрал время или оно в прошлом.\n"
+            "Формат: <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>, например 25.12.2025 18:30.\n"
+            "Или нажмите «Отмена» в сообщении выше."
+        )
+        return
+
+    data = await state.get_data()
+    batch_id = data.get("resched_batch_id")
+    await state.clear()
+
+    if not batch_id:
+        await message.answer("Не нашёл группу для переноса. Откройте /queue заново.")
+        return
+
+    # Собираем актуальные id постов группы прямо перед переносом
+    async with session_factory() as session:
+        groups = await crud.list_pending_grouped(session)
+        grp = next((g for g in groups if g[0].batch_id == batch_id), None)
+        if not grp:
+            await message.answer("Группа уже не в очереди.")
+            return
+        post_ids = [p.id for p in grp]
+        moved = 0
+        for pid in post_ids:
+            if await crud.reschedule_post(session, pid, new_time):
+                moved += 1
+
+    # Переназначаем задачи в планировщике
+    for pid in post_ids:
+        await sched.schedule_post(pid, new_time)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")
+    ]])
+    await message.answer(
+        f"✅ Перенесено постов: <b>{moved}</b> из {len(post_ids)}\n"
+        f"Новое время: <b>{to_local_str(new_time)}</b> (МСК).",
+        reply_markup=kb,
+    )
 
 @router.message(Command("cancelpost"))
 async def cmd_cancelpost(message: Message) -> None:

@@ -56,6 +56,11 @@ class ChatSettings(Base):
     rules_text: Mapped[str] = mapped_column(Text, default="")
     welcome_delete_after: Mapped[int] = mapped_column(Integer, default=0)  # 0=не удалять
 
+    # Присоединяться к кастом-эмодзи реакциям, поставленным другими.
+    autoreact_join_custom: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+
     # Связи
     warns: Mapped[list["Warn"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
     stopwords: Mapped[list["StopWord"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
