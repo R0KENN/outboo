@@ -34,6 +34,15 @@ class ChatSettings(Base):
     newbie_quarantine_hours: Mapped[int] = mapped_column(Integer, default=24)
     captcha_type: Mapped[str] = mapped_column(String(16), default="button")  # button|math
     quarantine_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ── Автоприём заявок на вступление (новое) ──
+    autoapprove_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ── Автореакции на посты канала (новое) ──
+    autoreact_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Набор эмодзи через запятую, например "👍,🔥,❤️". Бот ставит случайный из набора.
+    autoreact_emojis: Mapped[str] = mapped_column(String(255), default="👍")
+    # Ставить все эмодзи сразу (True) или один случайный из набора (False)
+    autoreact_random: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Тексты
     welcome_text: Mapped[str] = mapped_column(
@@ -90,6 +99,9 @@ class ScheduledPost(Base):
     delete_after: Mapped[int] = mapped_column(Integer, default=0)  # сек, 0=не удалять
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|sent|failed|cancelled
     repeat_rule: Mapped[str] = mapped_column(String(32), default="")  # daily|weekly (премиум)
+    # Группа мультиканальной публикации: один и тот же пост в несколько каналов
+    # имеет общий batch_id. Для одиночного поста — тоже свой уникальный id.
+    batch_id: Mapped[str] = mapped_column(String(36), default="", index=True)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -225,4 +237,30 @@ class GiveawayParticipant(Base):
     username: Mapped[str] = mapped_column(String(64), default="")
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+class ManagedChat(Base):
+    """Реестр чатов/каналов, куда добавлен бот (для списка и индивидуальных настроек).
+
+    Запись создаётся/обновляется в обработчике my_chat_member, когда бота
+    добавляют, повышают до админа или удаляют. is_active=False означает,
+    что бота убрали (запись остаётся в истории, но в списках не показывается).
+    """
+    __tablename__ = "managed_chats"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # group | supergroup | channel
+    chat_type: Mapped[str] = mapped_column(String(16), default="group")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    username: Mapped[str] = mapped_column(String(64), default="")
+    # Является ли бот администратором (нужно для большинства действий)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Кто добавил бота — этому пользователю показываем чат в его списке
+    added_by: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

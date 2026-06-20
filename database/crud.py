@@ -71,7 +71,9 @@ async def create_scheduled_post(
     delete_after: int,
     created_by: int,
     repeat_rule: str = "",
+    batch_id: str = "",
 ) -> ScheduledPost:
+
     """Создаёт запись отложенного поста в очереди и возвращает её."""
     post = ScheduledPost(
         channel_id=channel_id,
@@ -83,6 +85,7 @@ async def create_scheduled_post(
         delete_after=delete_after,
         created_by=created_by,
         repeat_rule=repeat_rule,
+        batch_id=batch_id,
         status="pending",
     )
     session.add(post)
@@ -146,6 +149,43 @@ async def reschedule_post(
     post.publish_at = new_time
     await session.commit()
     return True
+
+async def list_pending_grouped(
+    session: AsyncSession, created_by: int | None = None
+) -> list[list[ScheduledPost]]:
+    """Возвращает pending-посты, сгруппированные по batch_id.
+
+    Каждая группа — список постов одной мультиканальной публикации.
+    Посты без batch_id (старые/одиночные) образуют группу из одного элемента.
+    """
+    posts = await list_pending_posts(session, created_by)
+    groups: dict[str, list[ScheduledPost]] = {}
+    singles: list[list[ScheduledPost]] = []
+    for p in posts:
+        if p.batch_id:
+            groups.setdefault(p.batch_id, []).append(p)
+        else:
+            singles.append([p])
+    # Группы + одиночные, отсортированные по ближайшему времени публикации
+    result = list(groups.values()) + singles
+    result.sort(key=lambda grp: min(x.publish_at for x in grp))
+    return result
+
+
+async def cancel_batch(session: AsyncSession, batch_id: str) -> list[int]:
+    """Отменяет все pending-посты группы. Возвращает список отменённых id."""
+    stmt = select(ScheduledPost).where(
+        ScheduledPost.batch_id == batch_id,
+        ScheduledPost.status == "pending",
+    )
+    posts = list((await session.execute(stmt)).scalars().all())
+    cancelled = []
+    for p in posts:
+        p.status = "cancelled"
+        cancelled.append(p.id)
+    if cancelled:
+        await session.commit()
+    return cancelled
 
 # ──────────────────────────────────────────────────────────────────────────
 # Статистика (раздел 4.5 ТЗ)
@@ -530,4 +570,71 @@ async def set_giveaway_status(
 async def list_active_giveaways(session: AsyncSession) -> list[Giveaway]:
     """Активные конкурсы (для восстановления таймеров после рестарта)."""
     stmt = select(Giveaway).where(Giveaway.status == "active")
+    return list((await session.execute(stmt)).scalars().all())
+
+# ──────────────────────────────────────────────────────────────────────────
+# Реестр управляемых чатов/каналов (список + индивидуальные настройки)
+# ──────────────────────────────────────────────────────────────────────────
+from database.models import ManagedChat
+
+
+async def upsert_managed_chat(
+    session: AsyncSession,
+    chat_id: int,
+    chat_type: str,
+    title: str,
+    username: str,
+    is_admin: bool,
+    added_by: int,
+) -> ManagedChat:
+    """Создаёт или обновляет запись о чате, куда добавлен бот."""
+    obj = await session.get(ManagedChat, chat_id)
+    if obj is None:
+        obj = ManagedChat(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            title=title,
+            username=username,
+            is_admin=is_admin,
+            added_by=added_by,
+            is_active=True,
+        )
+        session.add(obj)
+    else:
+        obj.chat_type = chat_type
+        obj.title = title or obj.title
+        obj.username = username
+        obj.is_admin = is_admin
+        obj.is_active = True
+        # added_by сохраняем первоначальный, если он уже был
+        if not obj.added_by and added_by:
+            obj.added_by = added_by
+    await session.commit()
+    await session.refresh(obj)
+    return obj
+
+
+async def deactivate_managed_chat(session: AsyncSession, chat_id: int) -> None:
+    """Помечает чат как неактивный (бота удалили/кикнули)."""
+    obj = await session.get(ManagedChat, chat_id)
+    if obj is not None:
+        obj.is_active = False
+        await session.commit()
+
+
+async def get_managed_chat(
+    session: AsyncSession, chat_id: int
+) -> ManagedChat | None:
+    """Возвращает запись чата по id."""
+    return await session.get(ManagedChat, chat_id)
+
+
+async def list_managed_chats(
+    session: AsyncSession, only_active: bool = True
+) -> list[ManagedChat]:
+    """Список всех чатов/каналов, где есть бот (для глобальных админов бота)."""
+    stmt = select(ManagedChat)
+    if only_active:
+        stmt = stmt.where(ManagedChat.is_active.is_(True))
+    stmt = stmt.order_by(ManagedChat.title.asc())
     return list((await session.execute(stmt)).scalars().all())

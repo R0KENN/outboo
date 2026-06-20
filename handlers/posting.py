@@ -18,6 +18,7 @@ from aiogram.types import (
 
 from database.engine import session_factory
 from database import crud
+from database.crud import list_managed_chats, get_managed_chat
 from filters.admin import IsAdminOrModerator
 from services import scheduler as sched
 from utils.datetime_parse import parse_publish_time, to_local_str
@@ -43,24 +44,98 @@ def _cancel_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")
     ]])
 
+async def _channel_choice_kb(bot, user_id: int, is_global_admin: bool, selected: set[int]):
+    """Клавиатура мультивыбора каналов из managed_chats.
+
+    Показываем только каналы, где бот — админ. Отмеченные помечаются «✅».
+    Возвращает (markup, число_доступных_каналов).
+    """
+    from aiogram.enums import ChatMemberStatus
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    async with session_factory() as session:
+        chats = await list_managed_chats(session, only_active=True)
+
+    b = InlineKeyboardBuilder()
+    shown = 0
+    for ch in chats:
+        if ch.chat_type != "channel" or not ch.is_admin:
+            continue
+        if not is_global_admin:
+            try:
+                m = await bot.get_chat_member(ch.chat_id, user_id)
+                if m.status not in (
+                    ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+                ):
+                    continue
+            except Exception:
+                continue
+        title = ch.title or str(ch.chat_id)
+        mark = "✅ " if ch.chat_id in selected else "▫️ "
+        b.row(InlineKeyboardButton(
+            text=f"{mark}{title}",
+            callback_data=f"post:toggle:{ch.chat_id}",
+        ))
+        shown += 1
+
+    # Управляющие кнопки
+    b.row(InlineKeyboardButton(
+        text=f"➡️ Готово ({len(selected)})", callback_data="post:done",
+    ))
+    b.row(InlineKeyboardButton(
+        text="✍️ Ввести канал вручную", callback_data="post:manual",
+    ))
+    b.row(InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm"))
+    return b.as_markup(), shown
+
+
+async def start_channel_choice(
+    message: Message, state: FSMContext, user_id: int, edit: bool = False,
+) -> None:
+    """Стартер диалога: чистит состояние и показывает мультивыбор каналов."""
+    from config import settings as app_settings
+    is_global_admin = user_id in app_settings.admin_ids
+
+    await state.clear()
+    await state.set_state(NewPost.channel)
+    # Список выбранных каналов и флаг прав пользователя храним в state
+    await state.update_data(channel_ids=[], is_global_admin=is_global_admin)
+
+    kb, shown = await _channel_choice_kb(message.bot, user_id, is_global_admin, set())
+
+    if shown == 0:
+        text = (
+            "📢 <b>Создание поста</b>\n\n"
+            "У меня пока нет каналов, куда можно постить.\n"
+            "Добавьте бота в канал администратором — он появится в списке.\n\n"
+            "Либо введите канал вручную."
+        )
+    else:
+        text = (
+            "📢 <b>Куда публикуем?</b>\n"
+            "Отметьте один или несколько каналов и нажмите «Готово»:"
+        )
+
+    if edit:
+        try:
+            await message.edit_text(text, reply_markup=kb)
+            return
+        except Exception:
+            pass
+    await message.answer(text, reply_markup=kb)
 
 # ──────────────────────────────────────────────────────────────────────────
 # Создание поста (FSM)
 # ──────────────────────────────────────────────────────────────────────────
 @router.message(Command("newpost"))
 async def cmd_newpost(message: Message, state: FSMContext) -> None:
-    """Запускает диалог создания отложенного поста (в личке с ботом)."""
+    """Запускает диалог создания поста (в личке с ботом)."""
     if message.chat.type != "private":
-        await message.answer("Создавать посты удобнее в личке со мной: напишите /newpost мне в ЛС.")
+        await message.answer(
+            "Создавать посты удобнее в личке со мной: напишите /newpost мне в ЛС."
+        )
         return
-    await state.clear()
-    await state.set_state(NewPost.channel)
-    await message.answer(
-        "📢 Куда публикуем?\n"
-        "Пришлите @username канала или его числовой id.\n\n"
-        "Важно: бот должен быть администратором этого канала.",
-        reply_markup=_cancel_kb(),
-    )
+    await start_channel_choice(message, state, user_id=message.from_user.id)
 
 
 @router.callback_query(F.data == "post:cancel_fsm")
@@ -69,6 +144,83 @@ async def cb_cancel_fsm(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text("Создание поста отменено.")
     await callback.answer()
 
+@router.callback_query(NewPost.channel, F.data.startswith("post:toggle:"))
+async def cb_toggle_channel(callback: CallbackQuery, state: FSMContext) -> None:
+    """Добавляет/убирает канал из выбора (галочка)."""
+    chat_id = int(callback.data.split(":")[2])
+    data = await state.get_data()
+    selected = set(data.get("channel_ids", []))
+
+    if chat_id in selected:
+        selected.discard(chat_id)
+    else:
+        selected.add(chat_id)
+    await state.update_data(channel_ids=list(selected))
+
+    kb, _ = await _channel_choice_kb(
+        callback.bot, callback.from_user.id,
+        data.get("is_global_admin", False), selected,
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(NewPost.channel, F.data == "post:done")
+async def cb_done_channels(callback: CallbackQuery, state: FSMContext) -> None:
+    """Подтверждает выбор каналов и переходит к содержимому поста."""
+    data = await state.get_data()
+    selected = list(data.get("channel_ids", []))
+
+    if not selected:
+        await callback.answer("Выберите хотя бы один канал.", show_alert=True)
+        return
+
+    # Проверяем права бота во всех выбранных каналах + собираем названия
+    valid_ids: list[int] = []
+    titles: list[str] = []
+    async with session_factory() as session:
+        for chat_id in selected:
+            try:
+                member = await callback.bot.get_chat_member(chat_id, callback.bot.id)
+                if member.status not in ("administrator", "creator"):
+                    continue
+            except Exception:
+                continue
+            ch = await get_managed_chat(session, chat_id)
+            valid_ids.append(chat_id)
+            titles.append((ch.title if ch else None) or str(chat_id))
+
+    if not valid_ids:
+        await callback.answer(
+            "Ни в одном из выбранных каналов нет прав. Проверьте бота.",
+            show_alert=True,
+        )
+        return
+
+    await state.update_data(channel_ids=valid_ids, channel_titles=titles)
+    await state.set_state(NewPost.content)
+    await callback.message.edit_text(
+        f"Каналов выбрано: <b>{len(valid_ids)}</b>\n"
+        f"{', '.join(titles)}\n\n"
+        "Теперь пришлите содержимое поста: текст, фото, видео, документ "
+        "или альбом. Форматирование сохраняется.",
+        reply_markup=_cancel_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(NewPost.channel, F.data == "post:manual")
+async def cb_manual_channel(callback: CallbackQuery, state: FSMContext) -> None:
+    """Переключение на ручной ввод @username/id канала."""
+    await callback.message.edit_text(
+        "✍️ Пришлите @username канала или его числовой id.\n\n"
+        "Важно: бот должен быть администратором этого канала.",
+        reply_markup=_cancel_kb(),
+    )
+    await callback.answer()
 
 @router.message(NewPost.channel)
 async def step_channel(message: Message, state: FSMContext) -> None:
@@ -106,7 +258,10 @@ async def step_channel(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await state.update_data(channel_id=chat.id, channel_title=chat.title or str(chat.id))
+    await state.update_data(
+        channel_ids=[chat.id],
+        channel_titles=[chat.title or str(chat.id)],
+    )
     await state.set_state(NewPost.content)
     await message.answer(
         f"Канал принят: <b>{chat.title or chat.id}</b>\n\n"
@@ -252,7 +407,7 @@ async def step_when(message: Message, state: FSMContext) -> None:
 
 @router.message(NewPost.delete_after)
 async def step_delete_after(message: Message, state: FSMContext) -> None:
-    """Принимает интервал автоудаления и сохраняет пост в очередь."""
+    """Принимает интервал автоудаления и ставит пост в очередь во все каналы."""
     from datetime import datetime
     raw = (message.text or "").strip()
     delete_after = 0
@@ -265,29 +420,47 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
 
     data = await state.get_data()
     publish_at = datetime.fromisoformat(data["publish_at"])
+    channel_ids = data.get("channel_ids", [])
+    channel_titles = data.get("channel_titles", [])
 
+    if not channel_ids:
+        await message.answer("Не выбран ни один канал. Начните заново: /newpost")
+        await state.clear()
+        return
+
+    import uuid
+    batch_id = uuid.uuid4().hex  # общий идентификатор этой публикации
+
+    created_ids: list[int] = []
     async with session_factory() as session:
-        post = await crud.create_scheduled_post(
-            session,
-            channel_id=data["channel_id"],
-            text=data.get("text", ""),
-            media=data.get("media", ""),
-            buttons=data.get("buttons", ""),
-            parse_mode="HTML",
-            publish_at=publish_at,
-            delete_after=delete_after,
-            created_by=message.from_user.id,
-        )
+        for chat_id in channel_ids:
+            post = await crud.create_scheduled_post(
+                session,
+                channel_id=chat_id,
+                text=data.get("text", ""),
+                media=data.get("media", ""),
+                buttons=data.get("buttons", ""),
+                parse_mode="HTML",
+                publish_at=publish_at,
+                delete_after=delete_after,
+                created_by=message.from_user.id,
+                batch_id=batch_id,
+            )
+            created_ids.append(post.id)
 
-    # Ставим задачу в планировщик
-    await sched.schedule_post(post.id, publish_at)
+    # Ставим в планировщик каждую созданную запись
+    for post_id in created_ids:
+        await sched.schedule_post(post_id, publish_at)
+
     await state.clear()
 
     del_note = (f"\nАвтоудаление через {delete_after // 60} мин."
                 if delete_after else "")
+    ids_str = ", ".join(f"#{i}" for i in created_ids)
+    chans_str = ", ".join(channel_titles) if channel_titles else str(len(created_ids))
     await message.answer(
-        f"✅ Пост #{post.id} запланирован.\n"
-        f"Канал: <b>{data.get('channel_title')}</b>\n"
+        f"✅ Запланировано постов: <b>{len(created_ids)}</b> ({ids_str})\n"
+        f"Каналы: <b>{chans_str}</b>\n"
         f"Время: <b>{to_local_str(publish_at)}</b> (МСК){del_note}\n\n"
         f"Очередь: /queue"
     )
@@ -298,22 +471,47 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
 # ──────────────────────────────────────────────────────────────────────────
 @router.message(Command("queue"))
 async def cmd_queue(message: Message) -> None:
-    """Показывает список запланированных постов."""
+    """Показывает запланированные посты, мультиканальные — одной группой."""
     async with session_factory() as session:
-        posts = await crud.list_pending_posts(session)
+        groups = await crud.list_pending_grouped(session)
 
-    if not posts:
+    if not groups:
         await message.answer("Очередь пуста.")
         return
 
     lines = ["📋 <b>Запланированные посты:</b>\n"]
-    for p in posts:
-        preview = (p.text or "").replace("\n", " ")[:40] or "(медиа без текста)"
-        lines.append(
-            f"#{p.id} — {to_local_str(p.publish_at)} → "
-            f"<code>{p.channel_id}</code>\n   {preview}"
-        )
-    lines.append("\nОтмена: /cancelpost &lt;id&gt;\nПеренос: /repost &lt;id&gt; ДД.ММ.ГГГГ ЧЧ:ММ")
+    for grp in groups:
+        first = grp[0]
+        preview = (first.text or "").replace("\n", " ")[:40] or "(медиа без текста)"
+        when = to_local_str(first.publish_at)
+
+        if len(grp) == 1 and not first.batch_id:
+            # Старый одиночный пост без batch_id — управляется по id
+            lines.append(
+                f"#{first.id} — {when} → <code>{first.channel_id}</code>\n"
+                f"   {preview}"
+            )
+        elif len(grp) == 1:
+            # Один канал, но есть batch_id — даём и id, и группу
+            lines.append(
+                f"#{first.id} — {when} → 1 канал\n"
+                f"   {preview}\n"
+                f"   отмена группы: /cancelbatch {first.batch_id[:8]}"
+            )
+        else:
+            # Мультиканальная публикация
+            ids_str = ", ".join(f"#{p.id}" for p in grp)
+            lines.append(
+                f"🗂 {when} → <b>{len(grp)} каналов</b> ({ids_str})\n"
+                f"   {preview}\n"
+                f"   отмена группы: /cancelbatch {first.batch_id[:8]}"
+            )
+
+    lines.append(
+        "\nОтмена одного: /cancelpost &lt;id&gt;"
+        "\nОтмена группы: /cancelbatch &lt;код&gt;"
+        "\nПеренос: /repost &lt;id&gt; ДД.ММ.ГГГГ ЧЧ:ММ"
+    )
     await message.answer("\n".join(lines))
 
 
@@ -337,6 +535,43 @@ async def cmd_cancelpost(message: Message) -> None:
         else f"Пост #{post_id} не найден или уже не в очереди."
     )
 
+@router.message(Command("cancelbatch"))
+async def cmd_cancelbatch(message: Message) -> None:
+    """Отменяет всю группу мультиканальной публикации: /cancelbatch <код>."""
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer("Формат: /cancelbatch <код> (см. /queue)")
+        return
+    prefix = parts[1].strip()
+
+    # Находим полный batch_id по короткому префиксу среди pending-постов
+    async with session_factory() as session:
+        groups = await crud.list_pending_grouped(session)
+        target_batch = None
+        for grp in groups:
+            bid = grp[0].batch_id
+            if bid and bid.startswith(prefix):
+                target_batch = bid
+                break
+
+        if target_batch is None:
+            await message.answer("Группа не найдена. Проверьте код в /queue.")
+            return
+
+        cancelled = await crud.cancel_batch(session, target_batch)
+
+    # Снимаем точечные задачи планировщика для каждого отменённого поста
+    for post_id in cancelled:
+        try:
+            sched.scheduler.remove_job(f"post:{post_id}")
+        except Exception:
+            pass
+
+    ids_str = ", ".join(f"#{i}" for i in cancelled)
+    await message.answer(
+        f"Отменена группа: {len(cancelled)} постов ({ids_str})."
+        if cancelled else "В группе не осталось активных постов."
+    )
 
 @router.message(Command("repost"))
 async def cmd_repost(message: Message) -> None:

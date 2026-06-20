@@ -1,4 +1,8 @@
-"""Установка меню команд бота с разделением по областям видимости."""
+"""Установка меню команд бота. Оставляем в личке только /start.
+
+Вся навигация ведётся через инлайн-меню (кнопка «Главное меню» по /start).
+Для админов в группах сохраняем рабочие команды модерации.
+"""
 from aiogram import Bot
 from aiogram.types import (
     BotCommand,
@@ -8,20 +12,14 @@ from aiogram.types import (
 
 
 async def set_bot_commands(bot: Bot) -> None:
-    """Задаёт разные наборы команд для лички и для админов в группах."""
+    """В личке — только /start; в группах админам — команды модерации."""
 
-    # Команды, видимые в личке с ботом (всем пользователям)
+    # Личка: единственная команда — запуск инлайн-меню
     private_commands = [
-        BotCommand(command="start", description="Запустить бота"),
-        BotCommand(command="help", description="Справка по командам"),
-        BotCommand(command="ref", description="Моя реферальная ссылка"),
-        BotCommand(command="reftop", description="Рейтинг пригласителей"),
-        BotCommand(command="newpost", description="Создать отложенный пост"),
-        BotCommand(command="queue", description="Очередь постов"),
-        BotCommand(command="newgiveaway", description="Создать конкурс"),
+        BotCommand(command="start", description="Открыть меню"),
     ]
 
-    # Команды, видимые только администраторам внутри групп
+    # В группах админам оставляем рабочие команды модерации
     admin_commands = [
         BotCommand(command="settings", description="Настройки чата"),
         BotCommand(command="stats", description="Статистика чата"),

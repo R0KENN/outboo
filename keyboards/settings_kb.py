@@ -44,6 +44,14 @@ def main_settings_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
         callback_data=f"set:toggle:quarantine_enabled:{cid}",
     ))
     b.row(InlineKeyboardButton(
+        text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
+        callback_data=f"set:toggle:autoapprove_enabled:{cid}",
+    ))
+    b.row(InlineKeyboardButton(
+        text=f"{_mark(cfg.autoreact_enabled)} Автореакции на посты",
+        callback_data=f"set:react:{cid}",
+    ))
+    b.row(InlineKeyboardButton(
         text=f"⚙️ Параметры (порог варнов: {cfg.warn_limit})",
         callback_data=f"set:params:{cid}",
     ))
@@ -92,5 +100,40 @@ def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
         text=f"Тип капчи: {'пример' if cfg.captcha_type == 'math' else 'кнопка'}",
         callback_data=f"set:captchatype:{cid}",
     ))
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"set:refresh:{cid}"))
+    return b.as_markup()
+
+# Разрешённый Telegram базовый набор эмодзи для реакций (часть популярных)
+REACTION_CHOICES = ["👍", "❤️", "🔥", "🎉", "👏", "😁", "🤔", "🙏", "💯", "⚡"]
+
+
+def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
+    """Подменю автореакций: вкл/выкл, режим, выбор эмодзи (мультивыбор)."""
+    cid = cfg.chat_id
+    selected = {e.strip() for e in (cfg.autoreact_emojis or "").split(",") if e.strip()}
+    b = InlineKeyboardBuilder()
+
+    b.row(InlineKeyboardButton(
+        text=f"{_mark(cfg.autoreact_enabled)} Автореакции",
+        callback_data=f"set:toggle:autoreact_enabled:{cid}",
+    ))
+    b.row(InlineKeyboardButton(
+        text=("🎲 Режим: случайная" if cfg.autoreact_random
+              else "📚 Режим: все сразу"),
+        callback_data=f"set:reactmode:{cid}",
+    ))
+
+    # Сетка эмодзи по 5 в ряд; выбранные помечаются точкой
+    row_buttons = []
+    for emoji in REACTION_CHOICES:
+        mark = "•" if emoji in selected else ""
+        row_buttons.append(InlineKeyboardButton(
+            text=f"{mark}{emoji}",
+            callback_data=f"set:reactemoji:{emoji}:{cid}",
+        ))
+    # Раскладываем по 5 кнопок в ряд
+    for i in range(0, len(row_buttons), 5):
+        b.row(*row_buttons[i:i + 5])
+
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"set:refresh:{cid}"))
     return b.as_markup()

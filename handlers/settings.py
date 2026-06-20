@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 
 from database.crud import get_or_create_chat_settings
 from database.engine import session_factory
-from keyboards.settings_kb import main_settings_kb, params_kb
+from keyboards.settings_kb import main_settings_kb, params_kb, autoreact_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="settings")
@@ -112,6 +112,34 @@ async def on_settings_callback(callback: CallbackQuery) -> None:
             await session.refresh(cfg)
             await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))
             await callback.answer(f"Тип капчи: {cfg.captcha_type}")
+
+        elif action == "react":
+            # Открыть подменю автореакций
+            await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
+            await callback.answer()
+
+        elif action == "reactmode":
+            cfg.autoreact_random = not cfg.autoreact_random
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
+            await callback.answer(
+                "Случайная реакция" if cfg.autoreact_random else "Все реакции сразу"
+            )
+
+        elif action == "reactemoji":
+            # Мультивыбор эмодзи: добавляем/убираем из набора
+            emoji = parts[2]
+            current = [e.strip() for e in (cfg.autoreact_emojis or "").split(",") if e.strip()]
+            if emoji in current:
+                current.remove(emoji)
+            else:
+                current.append(emoji)
+            cfg.autoreact_emojis = ",".join(current)
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
+            await callback.answer(f"Набор: {cfg.autoreact_emojis or 'пусто'}")
 
         elif action == "params":
             await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))

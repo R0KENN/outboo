@@ -8,26 +8,31 @@ from aiogram.enums import ParseMode
 
 from config import settings
 from database.engine import engine, init_models
-from handlers import start
 from middlewares.admin_check import AdminCheckMiddleware
 from middlewares.throttling import ThrottlingMiddleware
 from utils.logger import setup_logging
+from utils.commands import set_bot_commands
+
+# ── обработчики ──
+from handlers import start
 from handlers import mod_commands, moderation, newcomers, posting
 from handlers import stats, admin as admin_handler
 from handlers import settings as settings_handler
 from handlers import broadcast as broadcast_handler
 from handlers import referral as referral_handler
 from handlers import giveaway as giveaway_handler
-from utils.commands import set_bot_commands
-from handlers import menu as menu_handler
 from handlers import sheets as sheets_handler
-from services.scheduler import setup_scheduler, restore_jobs
+# ── новые модули ──
+from handlers import menu_inline as menu_inline_handler
+from handlers import bot_membership as bot_membership_handler
+from handlers import join_requests as join_requests_handler
+from handlers import autoreact as autoreact_handler
+
+# ── сервисы ──
 from services.scheduler import setup_scheduler, restore_jobs
 from services.giveaway import restore_giveaways
-from services.scheduler import setup_scheduler, restore_jobs
 
 logger = logging.getLogger(__name__)
-
 
 async def main() -> None:
     setup_logging()
@@ -47,18 +52,21 @@ async def main() -> None:
     dp.message.middleware(ThrottlingMiddleware())
     dp.message.middleware(AdminCheckMiddleware())
 
-    # Роутеры (по мере роста проекта здесь добавляются модули)
+    # Роутеры (порядок важен)
+    dp.include_router(menu_inline_handler.router)   # /start, главное инлайн-меню, список чатов
+    dp.include_router(bot_membership_handler.router) # учёт добавления бота (my_chat_member)
+    dp.include_router(join_requests_handler.router)  # автоприём заявок (chat_join_request)
+    dp.include_router(autoreact_handler.router)      # автореакции на посты (channel_post)
     dp.include_router(start.router)
-    dp.include_router(menu_handler.router)        # reply-меню в личке
     dp.include_router(settings_handler.router)
-    dp.include_router(broadcast_handler.router)  # массовые рассылки (личка, FSM)
-    dp.include_router(referral_handler.router)   # реферальная система (личка)
-    dp.include_router(giveaway_handler.router)   # конкурсы (личка FSM + callback)
-    dp.include_router(sheets_handler.router)      # выгрузка в Google Sheets (личка)
-    dp.include_router(admin_handler.router)      # роли, словари, лог
-    dp.include_router(stats.router)            # статистика
-    dp.include_router(posting.router)          # автопостинг (FSM, очередь)
-    dp.include_router(newcomers.router)        # новички: капча, приветствие
+    dp.include_router(broadcast_handler.router)
+    dp.include_router(referral_handler.router)
+    dp.include_router(giveaway_handler.router)
+    dp.include_router(sheets_handler.router)
+    dp.include_router(admin_handler.router)
+    dp.include_router(stats.router)
+    dp.include_router(posting.router)
+    dp.include_router(newcomers.router)
     dp.include_router(mod_commands.router)
     dp.include_router(moderation.router)       # всегда последним
 
