@@ -325,3 +325,209 @@ async def get_moderation_log(
         .limit(limit)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+# ──────────────────────────────────────────────────────────────────────────
+# База подписчиков и рассылки (раздел 4.6 ТЗ)
+# ──────────────────────────────────────────────────────────────────────────
+from database.models import Subscriber
+
+
+async def upsert_subscriber(
+    session: AsyncSession,
+    user_id: int,
+    username: str = "",
+    full_name: str = "",
+) -> None:
+    """Регистрирует подписчика или обновляет его данные.
+
+    Вызывается на /start в личке. Если человек вернулся после блокировки —
+    снова помечаем его активным.
+    """
+    sub = await session.get(Subscriber, user_id)
+    if sub is None:
+        sub = Subscriber(
+            user_id=user_id, username=username or "",
+            full_name=full_name or "", is_active=True,
+        )
+        session.add(sub)
+    else:
+        sub.username = username or sub.username
+        sub.full_name = full_name or sub.full_name
+        sub.is_active = True
+    await session.commit()
+
+
+async def get_active_subscriber_ids(session: AsyncSession) -> list[int]:
+    """Список id всех активных подписчиков (для рассылки)."""
+    stmt = select(Subscriber.user_id).where(Subscriber.is_active.is_(True))
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def deactivate_subscriber(session: AsyncSession, user_id: int) -> None:
+    """Помечает подписчика неактивным (заблокировал бота)."""
+    sub = await session.get(Subscriber, user_id)
+    if sub is not None and sub.is_active:
+        sub.is_active = False
+        await session.commit()
+
+
+async def count_subscribers(session: AsyncSession) -> tuple[int, int]:
+    """Возвращает (всего, активных) подписчиков."""
+    total = (await session.execute(
+        select(_func.count()).select_from(Subscriber)
+    )).scalar_one()
+    active = (await session.execute(
+        select(_func.count()).select_from(Subscriber)
+        .where(Subscriber.is_active.is_(True))
+    )).scalar_one()
+    return int(total), int(active)
+
+# ──────────────────────────────────────────────────────────────────────────
+# Реферальная система (раздел 4.6 ТЗ)
+# ──────────────────────────────────────────────────────────────────────────
+from database.models import Referral
+
+
+async def register_referral(
+    session: AsyncSession, invited_id: int, referrer_id: int
+) -> bool:
+    """Фиксирует приглашение. True, если засчитано впервые.
+
+    Не засчитывает самоприглашение и повторный приход одного и того же
+    приглашённого (за счёт первичного ключа invited_id).
+    """
+    if invited_id == referrer_id:
+        return False
+    existing = await session.get(Referral, invited_id)
+    if existing is not None:
+        return False
+    session.add(Referral(invited_id=invited_id, referrer_id=referrer_id))
+    await session.commit()
+    return True
+
+
+async def count_referrals(session: AsyncSession, referrer_id: int) -> int:
+    """Сколько человек пригласил пользователь."""
+    stmt = (
+        select(_func.count())
+        .select_from(Referral)
+        .where(Referral.referrer_id == referrer_id)
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
+async def get_referrer(session: AsyncSession, invited_id: int) -> int | None:
+    """Возвращает id пригласившего для данного пользователя или None."""
+    ref = await session.get(Referral, invited_id)
+    return ref.referrer_id if ref else None
+
+
+async def top_referrers(
+    session: AsyncSession, limit: int = 10
+) -> list[tuple[int, int]]:
+    """Топ пригласивших: список (referrer_id, число_приглашённых)."""
+    stmt = (
+        select(Referral.referrer_id, _func.count().label("cnt"))
+        .group_by(Referral.referrer_id)
+        .order_by(_func.count().desc())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [(int(rid), int(cnt)) for rid, cnt in rows]
+
+# ──────────────────────────────────────────────────────────────────────────
+# Конкурсы и розыгрыши (раздел 4.6 ТЗ)
+# ──────────────────────────────────────────────────────────────────────────
+from database.models import Giveaway, GiveawayParticipant
+
+
+async def create_giveaway(
+    session: AsyncSession,
+    title: str,
+    winners_count: int,
+    require_channel_id: int,
+    require_channel_title: str,
+    finish_at: _dt,
+    created_by: int,
+) -> Giveaway:
+    """Создаёт конкурс в статусе active."""
+    g = Giveaway(
+        title=title,
+        winners_count=winners_count,
+        require_channel_id=require_channel_id,
+        require_channel_title=require_channel_title,
+        finish_at=finish_at,
+        created_by=created_by,
+        status="active",
+    )
+    session.add(g)
+    await session.commit()
+    await session.refresh(g)
+    return g
+
+
+async def set_giveaway_post(
+    session: AsyncSession, giveaway_id: int, post_chat_id: int, post_message_id: int
+) -> None:
+    """Запоминает координаты опубликованного поста конкурса."""
+    g = await session.get(Giveaway, giveaway_id)
+    if g is not None:
+        g.post_chat_id = post_chat_id
+        g.post_message_id = post_message_id
+        await session.commit()
+
+
+async def get_giveaway(session: AsyncSession, giveaway_id: int) -> Giveaway | None:
+    return await session.get(Giveaway, giveaway_id)
+
+
+async def add_participant(
+    session: AsyncSession, giveaway_id: int, user_id: int,
+    full_name: str, username: str,
+) -> bool:
+    """Добавляет участника. False, если уже участвует."""
+    stmt = select(GiveawayParticipant).where(
+        GiveawayParticipant.giveaway_id == giveaway_id,
+        GiveawayParticipant.user_id == user_id,
+    )
+    if (await session.execute(stmt)).scalar_one_or_none() is not None:
+        return False
+    session.add(GiveawayParticipant(
+        giveaway_id=giveaway_id, user_id=user_id,
+        full_name=full_name or "", username=username or "",
+    ))
+    await session.commit()
+    return True
+
+
+async def count_participants(session: AsyncSession, giveaway_id: int) -> int:
+    stmt = (
+        select(_func.count())
+        .select_from(GiveawayParticipant)
+        .where(GiveawayParticipant.giveaway_id == giveaway_id)
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
+async def list_participants(
+    session: AsyncSession, giveaway_id: int
+) -> list[GiveawayParticipant]:
+    stmt = select(GiveawayParticipant).where(
+        GiveawayParticipant.giveaway_id == giveaway_id
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def set_giveaway_status(
+    session: AsyncSession, giveaway_id: int, status: str
+) -> None:
+    g = await session.get(Giveaway, giveaway_id)
+    if g is not None:
+        g.status = status
+        await session.commit()
+
+
+async def list_active_giveaways(session: AsyncSession) -> list[Giveaway]:
+    """Активные конкурсы (для восстановления таймеров после рестарта)."""
+    stmt = select(Giveaway).where(Giveaway.status == "active")
+    return list((await session.execute(stmt)).scalars().all())

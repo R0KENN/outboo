@@ -8,3 +8,4 @@ python-dotenv==1.1.1
 pydantic==2.11.9
 pydantic-settings==2.10.1
 tzdata==2025.2
+gspread==6.1.4

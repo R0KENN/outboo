@@ -153,3 +153,76 @@ class MemberJoin(Base):
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+class Subscriber(Base):
+    """База подписчиков бота для массовых рассылок (раздел 4.6).
+
+    Запись создаётся, когда пользователь пишет боту /start в личку.
+    Поле is_active снимается, если при рассылке выяснилось, что
+    пользователь заблокировал бота (TelegramForbiddenError).
+    """
+    __tablename__ = "subscribers"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    full_name: Mapped[str] = mapped_column(String(255), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+class Referral(Base):
+    """Связь «кто кого пригласил» + счётчик приглашений (раздел 4.6).
+
+    referrer_id — тот, кто пригласил; invited_id — приглашённый (PK,
+    чтобы один приглашённый засчитался только один раз).
+    """
+    __tablename__ = "referrals"
+
+    invited_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    referrer_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+class Giveaway(Base):
+    """Конкурс/розыгрыш (раздел 4.6).
+
+    require_channel_id — канал, подписка на который обязательна для участия
+    (0, если условия подписки нет). post_chat_id/post_message_id — где висит
+    пост с кнопкой «Участвовать», чтобы потом отредактировать его результатом.
+    """
+    __tablename__ = "giveaways"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    winners_count: Mapped[int] = mapped_column(Integer, default=1)
+    require_channel_id: Mapped[int] = mapped_column(BigInteger, default=0)
+    require_channel_title: Mapped[str] = mapped_column(String(255), default="")
+    post_chat_id: Mapped[int] = mapped_column(BigInteger, default=0)
+    post_message_id: Mapped[int] = mapped_column(Integer, default=0)
+    finish_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active|finished|cancelled
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GiveawayParticipant(Base):
+    """Участник конкурса (раздел 4.6). Пара (giveaway_id, user_id) уникальна."""
+    __tablename__ = "giveaway_participants"
+    __table_args__ = (
+        UniqueConstraint("giveaway_id", "user_id", name="uq_giveaway_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    giveaway_id: Mapped[int] = mapped_column(
+        ForeignKey("giveaways.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    full_name: Mapped[str] = mapped_column(String(255), default="")
+    username: Mapped[str] = mapped_column(String(64), default="")
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

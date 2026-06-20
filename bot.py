@@ -15,6 +15,15 @@ from utils.logger import setup_logging
 from handlers import mod_commands, moderation, newcomers, posting
 from handlers import stats, admin as admin_handler
 from handlers import settings as settings_handler
+from handlers import broadcast as broadcast_handler
+from handlers import referral as referral_handler
+from handlers import giveaway as giveaway_handler
+from utils.commands import set_bot_commands
+from handlers import menu as menu_handler
+from handlers import sheets as sheets_handler
+from services.scheduler import setup_scheduler, restore_jobs
+from services.scheduler import setup_scheduler, restore_jobs
+from services.giveaway import restore_giveaways
 from services.scheduler import setup_scheduler, restore_jobs
 
 logger = logging.getLogger(__name__)
@@ -40,8 +49,13 @@ async def main() -> None:
 
     # Роутеры (по мере роста проекта здесь добавляются модули)
     dp.include_router(start.router)
+    dp.include_router(menu_handler.router)        # reply-меню в личке
     dp.include_router(settings_handler.router)
-    dp.include_router(admin_handler.router)    # роли, словари, лог
+    dp.include_router(broadcast_handler.router)  # массовые рассылки (личка, FSM)
+    dp.include_router(referral_handler.router)   # реферальная система (личка)
+    dp.include_router(giveaway_handler.router)   # конкурсы (личка FSM + callback)
+    dp.include_router(sheets_handler.router)      # выгрузка в Google Sheets (личка)
+    dp.include_router(admin_handler.router)      # роли, словари, лог
     dp.include_router(stats.router)            # статистика
     dp.include_router(posting.router)          # автопостинг (FSM, очередь)
     dp.include_router(newcomers.router)        # новички: капча, приветствие
@@ -50,10 +64,12 @@ async def main() -> None:
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
+        await set_bot_commands(bot)   # установить меню команд
 
         # Планировщик отложенных постов (Этап 3)
         setup_scheduler(bot)
         await restore_jobs()  # восстановить задачи из БД после рестарта
+        await restore_giveaways(bot)   # восстановить таймеры конкурсов
 
         logger.info("Бот в режиме long polling.")
         await dp.start_polling(

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
 
     bot_admins: str = Field(default="", alias="BOT_ADMINS")
 
+    google_creds_path: str = Field(default="", alias="GOOGLE_CREDS_PATH")
+    google_sheet_id: str = Field(default="", alias="GOOGLE_SHEET_ID")
+
     @property
     def admin_ids(self) -> set[int]:
         """Множество id владельцев бота (для команд в личке)."""

@@ -22,3 +22,5 @@ __pycache__/
 # Настройки редактора
 .vscode/
 .idea/
+
+google_creds.json

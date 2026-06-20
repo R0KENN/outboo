@@ -2,17 +2,58 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from keyboards.main_menu import main_menu_kb
 
 router = Router(name="start")
 
 
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
-    await message.answer(
+    # Регистрируем подписчика и реферала только в личке
+    if message.chat.type == "private" and message.from_user:
+        from database.engine import session_factory
+        from database import crud
+
+        user_id = message.from_user.id
+
+        # Достаём аргумент после /start: например "ref_123456"
+        parts = (message.text or "").split(maxsplit=1)
+        payload = parts[1].strip() if len(parts) > 1 else ""
+
+        async with session_factory() as session:
+            # Подписчик для рассылок
+            await crud.upsert_subscriber(
+                session,
+                user_id,
+                message.from_user.username or "",
+                message.from_user.full_name or "",
+            )
+            # Реферальный переход
+            if payload.startswith("ref_"):
+                raw = payload[4:]
+                if raw.isdigit():
+                    referrer_id = int(raw)
+                    ok = await crud.register_referral(session, user_id, referrer_id)
+                    if ok:
+                        # Уведомим пригласившего (необязательно, но приятно)
+                        try:
+                            await message.bot.send_message(
+                                referrer_id,
+                                f"🎉 По вашей ссылке пришёл новый пользователь: "
+                                f"{message.from_user.full_name}"
+                            )
+                        except Exception:
+                            pass  # пригласивший мог закрыть личку — не критично
+
+    text = (
         "Бот-движок запущен.\n"
-        "Добавьте меня в группу администратором и откройте /settings.\n"
-        "Полный список команд: /help"
+        "Добавьте меня в группу администратором и откройте /settings.\n\n"
+        "Пользуйтесь кнопками меню ниже 👇"
     )
+    if message.chat.type == "private":
+        await message.answer(text, reply_markup=main_menu_kb(message.from_user.id))
+    else:
+        await message.answer(text)
 
 
 @router.message(Command("ping"))
@@ -48,6 +89,18 @@ async def cmd_help(message: Message) -> None:
 
         "<b>Статистика (админ/модератор):</b>\n"
         "/stats day|week|month — отчёт за период\n\n"
+
+        "<b>Реферальная программа (в личке):</b>\n"
+        "/ref — ваша ссылка и число приглашённых\n"
+        "/reftop — рейтинг пригласителей\n\n"
+
+        "<b>Конкурсы (в личке, для админов):</b>\n"
+        "/newgiveaway — создать конкурс\n"
+        "/endgiveaway <id> — подвести итоги досрочно\n\n"
+
+        "<b>Экспорт данных (владелец, в личке):</b>\n"
+        "/sheettest — проверить подключение к Google Sheets\n"
+        "/export — выгрузить данные в таблицу\n\n"
 
         "<b>Автопостинг (в личке с ботом):</b>\n"
         "/newpost — создать отложенный пост\n"
