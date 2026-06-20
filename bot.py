@@ -19,7 +19,6 @@ from handlers import mod_commands, moderation, newcomers, posting
 from handlers import stats, admin as admin_handler
 from handlers import settings as settings_handler
 from handlers import broadcast as broadcast_handler
-from handlers import referral as referral_handler
 from handlers import giveaway as giveaway_handler
 from handlers import sheets as sheets_handler
 # ── новые модули ──
@@ -33,6 +32,7 @@ from services.scheduler import setup_scheduler, restore_jobs
 from services.giveaway import restore_giveaways
 
 logger = logging.getLogger(__name__)
+
 
 async def main() -> None:
     setup_logging()
@@ -52,31 +52,37 @@ async def main() -> None:
     dp.message.middleware(ThrottlingMiddleware())
     dp.message.middleware(AdminCheckMiddleware())
 
-    # Роутеры (порядок важен)
-    dp.include_router(menu_inline_handler.router)   # /start, главное инлайн-меню, список чатов
+    # ── Роутеры (порядок важен) ──
+    # Инлайн-меню и события статуса бота — раньше «ловящих всё» роутеров.
+    dp.include_router(menu_inline_handler.router)    # /start, главное инлайн-меню, список чатов
     dp.include_router(bot_membership_handler.router) # учёт добавления бота (my_chat_member)
     dp.include_router(join_requests_handler.router)  # автоприём заявок (chat_join_request)
     dp.include_router(autoreact_handler.router)      # автореакции на посты (channel_post)
+
+    # Базовые команды (/ping, /help) — /start здесь уже не обрабатывается
     dp.include_router(start.router)
+
+    # Функциональные модули в личке
     dp.include_router(settings_handler.router)
-    dp.include_router(broadcast_handler.router)
-    dp.include_router(referral_handler.router)
-    dp.include_router(giveaway_handler.router)
-    dp.include_router(sheets_handler.router)
-    dp.include_router(admin_handler.router)
-    dp.include_router(stats.router)
-    dp.include_router(posting.router)
-    dp.include_router(newcomers.router)
-    dp.include_router(mod_commands.router)
-    dp.include_router(moderation.router)       # всегда последним
+    dp.include_router(broadcast_handler.router)  # рассылка по подписчикам (FSM)
+    dp.include_router(giveaway_handler.router)   # конкурсы (FSM + callback)
+    dp.include_router(sheets_handler.router)      # экспорт в Google Sheets
+    dp.include_router(posting.router)            # автопостинг (FSM, очередь)
+
+    # Модули внутри групп
+    dp.include_router(admin_handler.router)      # роли, словари, лог
+    dp.include_router(stats.router)              # статистика
+    dp.include_router(newcomers.router)          # новички: капча, приветствие
+    dp.include_router(mod_commands.router)       # ручные команды модерации
+    dp.include_router(moderation.router)         # авто-модерация — всегда последним
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await set_bot_commands(bot)   # установить меню команд
 
-        # Планировщик отложенных постов (Этап 3)
+        # Планировщик отложенных постов и конкурсов
         setup_scheduler(bot)
-        await restore_jobs()  # восстановить задачи из БД после рестарта
+        await restore_jobs()           # восстановить посты из БД после рестарта
         await restore_giveaways(bot)   # восстановить таймеры конкурсов
 
         logger.info("Бот в режиме long polling.")

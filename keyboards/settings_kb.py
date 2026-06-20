@@ -10,54 +10,61 @@ def _mark(enabled: bool) -> str:
     return "✅" if enabled else "❌"
 
 
-def main_settings_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
-    """Главное меню настроек чата. callback_data несёт chat_id для надёжности."""
+def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeyboardMarkup:
+    """Меню настроек, разное для канала и для группы."""
     cid = cfg.chat_id
     b = InlineKeyboardBuilder()
 
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.antispam_enabled)} Антиспам",
-        callback_data=f"set:toggle:antispam_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.antimat_enabled)} Антимат",
-        callback_data=f"set:toggle:antimat_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.antiflood_enabled)} Антифлуд",
-        callback_data=f"set:toggle:antiflood_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.captcha_enabled)} Капча для новичков",
-        callback_data=f"set:toggle:captcha_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.welcome_enabled)} Приветствие",
-        callback_data=f"set:toggle:welcome_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.clean_service_msgs)} Чистить служебные сообщения",
-        callback_data=f"set:toggle:clean_service_msgs:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.quarantine_enabled)} Карантин новичков",
-        callback_data=f"set:toggle:quarantine_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
-        callback_data=f"set:toggle:autoapprove_enabled:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"{_mark(cfg.autoreact_enabled)} Автореакции на посты",
-        callback_data=f"set:react:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text=f"⚙️ Параметры (порог варнов: {cfg.warn_limit})",
-        callback_data=f"set:params:{cid}",
-    ))
-    b.row(InlineKeyboardButton(
-        text="🔄 Обновить", callback_data=f"set:refresh:{cid}",
-    ))
+    if chat_type == "channel":
+        # ── Настройки КАНАЛА ──
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.autoreact_enabled)} Автореакции на посты",
+            callback_data=f"set:react:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
+            callback_data=f"set:toggle:autoapprove_enabled:{cid}",
+        ))
+    else:
+        # ── Настройки ГРУППЫ ──
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.antispam_enabled)} Антиспам",
+            callback_data=f"set:toggle:antispam_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.antimat_enabled)} Антимат",
+            callback_data=f"set:toggle:antimat_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.antiflood_enabled)} Антифлуд",
+            callback_data=f"set:toggle:antiflood_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.captcha_enabled)} Капча для новичков",
+            callback_data=f"set:toggle:captcha_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.welcome_enabled)} Приветствие",
+            callback_data=f"set:toggle:welcome_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.clean_service_msgs)} Чистить служебные",
+            callback_data=f"set:toggle:clean_service_msgs:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.quarantine_enabled)} Карантин новичков",
+            callback_data=f"set:toggle:quarantine_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
+            callback_data=f"set:toggle:autoapprove_enabled:{cid}",
+        ))
+        b.row(InlineKeyboardButton(
+            text=f"⚙️ Параметры (порог варнов: {cfg.warn_limit})",
+            callback_data=f"set:params:{cid}",
+        ))
+
+    b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
     return b.as_markup()
 
 

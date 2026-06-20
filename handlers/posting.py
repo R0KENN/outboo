@@ -19,15 +19,11 @@ from aiogram.types import (
 from database.engine import session_factory
 from database import crud
 from database.crud import list_managed_chats, get_managed_chat
-from filters.admin import IsAdminOrModerator
 from services import scheduler as sched
 from utils.datetime_parse import parse_publish_time, to_local_str
 
 logger = logging.getLogger(__name__)
 router = Router(name="posting")
-
-# Команды постинга — только для админов/модераторов
-router.message.filter(IsAdminOrModerator())
 
 
 class NewPost(StatesGroup):
@@ -128,7 +124,10 @@ async def start_channel_choice(
 # Создание поста (FSM)
 # ──────────────────────────────────────────────────────────────────────────
 @router.message(Command("newpost"))
-async def cmd_newpost(message: Message, state: FSMContext) -> None:
+async def cmd_newpost(
+    message: Message, state: FSMContext,
+    is_admin: bool = False, is_moderator: bool = False,
+) -> None:
     """Запускает диалог создания поста (в личке с ботом)."""
     if message.chat.type != "private":
         await message.answer(
@@ -142,6 +141,36 @@ async def cmd_newpost(message: Message, state: FSMContext) -> None:
 async def cb_cancel_fsm(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text("Создание поста отменено.")
+    await callback.answer()
+
+@router.callback_query(NewPost.when, F.data == "post:now")
+async def cb_publish_now(callback: CallbackQuery, state: FSMContext) -> None:
+    """Публикует пост немедленно (без указания даты)."""
+    from datetime import datetime, timezone
+    # Время «сейчас» + пара секунд, чтобы планировщик гарантированно подхватил
+    publish_at = datetime.now(timezone.utc)
+    await state.update_data(publish_at=publish_at.isoformat())
+    await state.set_state(NewPost.delete_after)
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Не удалять", callback_data="post:nodel")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+    ])
+    await callback.message.edit_text(
+        "Публикуем сейчас. Удалить пост автоматически через время?\n"
+        "Пришлите число минут или нажмите «Не удалять».",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(NewPost.delete_after, F.data == "post:nodel")
+async def cb_no_delete(callback: CallbackQuery, state: FSMContext) -> None:
+    """Без автоудаления — сразу финализируем пост."""
+    await _finalize_posts(
+        callback.message.model_copy(update={"from_user": callback.from_user}),
+        state, delete_after=0,
+    )
     await callback.answer()
 
 @router.callback_query(NewPost.channel, F.data.startswith("post:toggle:"))
@@ -373,16 +402,23 @@ def _parse_buttons(text: str) -> str:
 
 @router.message(NewPost.buttons)
 async def step_buttons(message: Message, state: FSMContext) -> None:
-    """Принимает кнопки или пропуск."""
+    """Принимает кнопки или пропуск, затем спрашивает время."""
     raw = (message.text or "").strip()
     buttons = "" if raw == "-" else _parse_buttons(raw)
     await state.update_data(buttons=buttons)
     await state.set_state(NewPost.when)
+
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data="post:now")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+    ])
     await message.answer(
         "Когда опубликовать?\n"
         "Пришлите дату и время в формате <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n"
-        "Например: <code>25.12.2025 18:30</code> (время МСК).",
-        reply_markup=_cancel_kb(),
+        "(например 25.12.2025 18:30, время МСК)\n\n"
+        "или нажмите «Опубликовать сейчас».",
+        reply_markup=kb,
     )
 
 
@@ -405,18 +441,10 @@ async def step_when(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(NewPost.delete_after)
-async def step_delete_after(message: Message, state: FSMContext) -> None:
-    """Принимает интервал автоудаления и ставит пост в очередь во все каналы."""
+async def _finalize_posts(message: Message, state: FSMContext, delete_after: int) -> None:
+    """Создаёт записи постов во все выбранные каналы и ставит их в планировщик."""
     from datetime import datetime
-    raw = (message.text or "").strip()
-    delete_after = 0
-    if raw != "-":
-        try:
-            delete_after = max(0, int(raw)) * 60  # минуты -> секунды
-        except ValueError:
-            await message.answer("Пришлите число минут или «-».")
-            return
+    import uuid
 
     data = await state.get_data()
     publish_at = datetime.fromisoformat(data["publish_at"])
@@ -424,13 +452,11 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
     channel_titles = data.get("channel_titles", [])
 
     if not channel_ids:
-        await message.answer("Не выбран ни один канал. Начните заново: /newpost")
+        await message.answer("Не выбран ни один канал. Начните заново.")
         await state.clear()
         return
 
-    import uuid
-    batch_id = uuid.uuid4().hex  # общий идентификатор этой публикации
-
+    batch_id = uuid.uuid4().hex
     created_ids: list[int] = []
     async with session_factory() as session:
         for chat_id in channel_ids:
@@ -448,7 +474,6 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
             )
             created_ids.append(post.id)
 
-    # Ставим в планировщик каждую созданную запись
     for post_id in created_ids:
         await sched.schedule_post(post_id, publish_at)
 
@@ -458,12 +483,31 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
                 if delete_after else "")
     ids_str = ", ".join(f"#{i}" for i in created_ids)
     chans_str = ", ".join(channel_titles) if channel_titles else str(len(created_ids))
+
+    from datetime import timezone
+    is_now = (publish_at - datetime.now(timezone.utc)).total_seconds() < 90
+    when_str = "сейчас" if is_now else f"{to_local_str(publish_at)} (МСК)"
+
     await message.answer(
-        f"✅ Запланировано постов: <b>{len(created_ids)}</b> ({ids_str})\n"
+        f"✅ Постов: <b>{len(created_ids)}</b> ({ids_str})\n"
         f"Каналы: <b>{chans_str}</b>\n"
-        f"Время: <b>{to_local_str(publish_at)}</b> (МСК){del_note}\n\n"
+        f"Время: <b>{when_str}</b>{del_note}\n\n"
         f"Очередь: /queue"
     )
+
+
+@router.message(NewPost.delete_after)
+async def step_delete_after(message: Message, state: FSMContext) -> None:
+    """Принимает число минут автоудаления (или «-») и финализирует пост."""
+    raw = (message.text or "").strip()
+    delete_after = 0
+    if raw != "-":
+        try:
+            delete_after = max(0, int(raw)) * 60
+        except ValueError:
+            await message.answer("Пришлите число минут или «-».")
+            return
+    await _finalize_posts(message, state, delete_after)
 
 
 # ──────────────────────────────────────────────────────────────────────────

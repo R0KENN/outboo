@@ -10,7 +10,7 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from database.crud import get_or_create_chat_settings
+from database.crud import get_or_create_chat_settings, get_managed_chat
 from database.engine import session_factory
 from keyboards.settings_kb import main_settings_kb, params_kb, autoreact_kb
 
@@ -55,7 +55,7 @@ async def cmd_settings(message: Message) -> None:
 
     async with session_factory() as session:
         cfg = await get_or_create_chat_settings(session, message.chat.id)
-        kb = main_settings_kb(cfg)
+        kb = main_settings_kb(cfg, message.chat.type)
     await message.answer("⚙️ <b>Настройки чата</b>\nНажмите, чтобы переключить:", reply_markup=kb)
 
 
@@ -71,6 +71,10 @@ async def on_settings_callback(callback: CallbackQuery) -> None:
 
     # Последний элемент callback_data — всегда chat_id
     chat_id = int(parts[-1])
+    # Тип чата нужен для правильного набора кнопок настроек
+    async with session_factory() as _s:
+        _mc = await get_managed_chat(_s, chat_id)
+    chat_type = _mc.chat_type if _mc else "group"
 
     # Защита: переключать настройки может только админ этого чата
     if not await _is_admin(callback, chat_id, callback.from_user.id):
@@ -85,7 +89,7 @@ async def on_settings_callback(callback: CallbackQuery) -> None:
             setattr(cfg, field, not getattr(cfg, field))
             await session.commit()
             await session.refresh(cfg)
-            await callback.message.edit_reply_markup(reply_markup=main_settings_kb(cfg))
+            await callback.message.edit_reply_markup(reply_markup=main_settings_kb(cfg, chat_type))
             await callback.answer("Сохранено.")
 
         elif action in ("inc", "dec"):
@@ -147,8 +151,8 @@ async def on_settings_callback(callback: CallbackQuery) -> None:
 
         elif action == "refresh":
             await callback.message.edit_text(
-                "⚙️ <b>Настройки чата</b>\nНажмите, чтобы переключить:",
-                reply_markup=main_settings_kb(cfg),
+                "⚙️ <b>Настройки</b>\nНажмите, чтобы переключить:",
+                reply_markup=main_settings_kb(cfg, chat_type),
             )
             await callback.answer()
 

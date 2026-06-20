@@ -56,25 +56,20 @@ def _chat_icon(chat_type: str) -> str:
 
 # ─────────────────────────── клавиатуры ───────────────────────────
 def home_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Главное инлайн-меню. Владельцам бота — дополнительные пункты."""
+    """Главное инлайн-меню."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="🗂 Мои чаты и каналы", callback_data="menu:chats"))
     b.row(
-        InlineKeyboardButton(text="📝 Создать пост", callback_data="menu:newpost"),
+        InlineKeyboardButton(text="📢 Опубликовать в каналы", callback_data="menu:newpost"),
         InlineKeyboardButton(text="📋 Очередь", callback_data="menu:queue"),
     )
-    b.row(
-        InlineKeyboardButton(text="🎉 Конкурс", callback_data="menu:giveaway"),
-        InlineKeyboardButton(text="🔗 Реф. ссылка", callback_data="menu:ref"),
-    )
-    # Только для владельцев бота
+    b.row(InlineKeyboardButton(text="🎉 Конкурс", callback_data="menu:giveaway"))
     if _is_global_admin(user_id):
         b.row(
             InlineKeyboardButton(text="📨 Рассылка", callback_data="menu:broadcast"),
             InlineKeyboardButton(text="👥 Подписчики", callback_data="menu:subs"),
         )
-        b.row(InlineKeyboardButton(text="📊 Экспорт в Sheets", callback_data="menu:export"))
-
+        b.row(InlineKeyboardButton(text="📊 Экспорт", callback_data="menu:export"))
     b.row(InlineKeyboardButton(text="ℹ️ Помощь", callback_data="menu:help"))
     return b.as_markup()
 
@@ -220,8 +215,8 @@ async def on_open_chat(callback: CallbackQuery) -> None:
 
     await callback.message.edit_text(
         f"{icon} <b>{title}</b>\n"
-        f"Индивидуальные настройки этого чата:",
-        reply_markup=main_settings_kb(cfg),
+        f"Индивидуальные настройки этого {'канала' if (ch and ch.chat_type=='channel') else 'чата'}:",
+        reply_markup=main_settings_kb(cfg, ch.chat_type if ch else "group"),
     )
     await callback.answer()
 
@@ -276,23 +271,17 @@ async def on_giveaway(callback: CallbackQuery, state: FSMContext) -> None:
     await cmd_newgiveaway(_as_user_message(callback), state)
     await callback.answer()
 
-
-@router.callback_query(F.data == "menu:ref")
-async def on_ref(callback: CallbackQuery) -> None:
-    """Реферальная ссылка пользователя."""
-    from handlers.referral import cmd_ref
-    await cmd_ref(_as_user_message(callback))
-    await callback.answer()
-
-
 @router.callback_query(F.data == "menu:broadcast")
 async def on_broadcast(callback: CallbackQuery, state: FSMContext) -> None:
-    """Массовая рассылка (только владельцы бота)."""
+    """Массовая рассылка по подписчикам бота (только владельцы)."""
     if not _is_global_admin(callback.from_user.id):
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.broadcast import cmd_broadcast
-    await cmd_broadcast(_as_user_message(callback), state)
+    await cmd_broadcast(
+        callback.message.model_copy(update={"from_user": callback.from_user}),
+        state,
+    )
     await callback.answer()
 
 
@@ -303,16 +292,44 @@ async def on_subs(callback: CallbackQuery) -> None:
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.broadcast import cmd_subs
-    await cmd_subs(_as_user_message(callback))
+    await cmd_subs(
+        callback.message.model_copy(update={"from_user": callback.from_user})
+    )
     await callback.answer()
-
 
 @router.callback_query(F.data == "menu:export")
 async def on_export(callback: CallbackQuery) -> None:
-    """Экспорт в Google Sheets (только владельцы бота)."""
+    """Меню экспорта в Google Sheets (только владельцы бота)."""
+    if not _is_global_admin(callback.from_user.id):
+        await callback.answer("Только для владельцев бота.", show_alert=True)
+        return
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="📤 Выгрузить всё", callback_data="menu:export_run"))
+    b.row(InlineKeyboardButton(text="🔌 Проверить подключение", callback_data="menu:export_test"))
+    b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
+    await callback.message.edit_text(
+        "📊 <b>Экспорт в Google Sheets</b>\nВыгружаются подписчики, участники "
+        "конкурсов и журнал модерации.",
+        reply_markup=b.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:export_run")
+async def on_export_run(callback: CallbackQuery) -> None:
     if not _is_global_admin(callback.from_user.id):
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.sheets import cmd_export
-    await cmd_export(_as_user_message(callback))
+    await cmd_export(callback.message.model_copy(update={"from_user": callback.from_user}))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:export_test")
+async def on_export_test(callback: CallbackQuery) -> None:
+    if not _is_global_admin(callback.from_user.id):
+        await callback.answer("Только для владельцев бота.", show_alert=True)
+        return
+    from handlers.sheets import cmd_sheettest
+    await cmd_sheettest(callback.message.model_copy(update={"from_user": callback.from_user}))
     await callback.answer()

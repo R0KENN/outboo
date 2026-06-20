@@ -20,12 +20,11 @@ from database import crud
 from filters.admin import IsAdminOrModerator
 from services import giveaway as gv
 from utils.datetime_parse import parse_publish_time, to_local_str
+from keyboards.chat_picker import build_chat_picker
 
 logger = logging.getLogger(__name__)
 router = Router(name="giveaway")
 
-# Создание конкурса — только админам/модераторам
-router.message.filter(IsAdminOrModerator())
 
 # Статусы, означающие «подписан на канал»
 _SUBSCRIBED = (
@@ -65,12 +64,22 @@ async def cmd_newgiveaway(message: Message, state: FSMContext) -> None:
         return
     await state.clear()
     await state.set_state(NewGiveaway.require_channel)
+
+    kb, shown = await build_chat_picker(
+        message.bot, message.from_user.id,
+        callback_prefix="gvreq", only_type="channel", show_manual=True,
+    )
+    # Добавим кнопку «без условия» поверх пикера
+    from aiogram.types import InlineKeyboardButton
+    kb.inline_keyboard.insert(0, [
+        InlineKeyboardButton(text="🚫 Без обязательной подписки", callback_data="gvreq:0")
+    ])
+
     await message.answer(
-        "🎯 Создаём конкурс.\n\n"
+        "🎯 <b>Создаём конкурс</b>\n\n"
         "Шаг 1. Канал, подписка на который обязательна для участия.\n"
-        "Пришлите @username канала (бот должен быть его админом), "
-        "или «-», если подписка не требуется.",
-        reply_markup=_cancel_kb(),
+        "Выберите канал или «без условия»:",
+        reply_markup=kb,
     )
 
 
@@ -80,6 +89,34 @@ async def cb_cancel_fsm(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text("Создание конкурса отменено.")
     await callback.answer()
 
+@router.callback_query(NewGiveaway.require_channel, F.data.startswith("gvreq:"))
+async def cb_require_channel(callback: CallbackQuery, state: FSMContext) -> None:
+    """Канал-условие выбран кнопкой (или 0 = без условия)."""
+    chat_id = int(callback.data.split(":")[1])
+    if chat_id == 0:
+        await state.update_data(require_channel_id=0, require_channel_title="")
+    else:
+        async with session_factory() as session:
+            ch = await crud.get_managed_chat(session, chat_id)
+        await state.update_data(
+            require_channel_id=chat_id,
+            require_channel_title=(ch.title if ch else str(chat_id)),
+        )
+    await state.set_state(NewGiveaway.title)
+    await callback.message.edit_text(
+        "Шаг 2. Пришлите текст конкурса (что разыгрываем, условия).",
+        reply_markup=_cancel_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(NewGiveaway.require_channel, F.data == "gvreq_manual")
+async def cb_require_manual(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.message.edit_text(
+        "Пришлите @username канала-условия (бот должен быть его админом).",
+        reply_markup=_cancel_kb(),
+    )
+    await callback.answer()
 
 @router.message(NewGiveaway.require_channel)
 async def step_require_channel(message: Message, state: FSMContext) -> None:
@@ -146,34 +183,23 @@ async def step_when(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(finish_at=finish_at.isoformat())
     await state.set_state(NewGiveaway.post_channel)
+
+    kb, shown = await build_chat_picker(
+        message.bot, message.from_user.id,
+        callback_prefix="gvpost", only_type="channel", show_manual=True,
+    )
     await message.answer(
-        "Шаг 5. Куда опубликовать конкурс?\n"
-        "Пришлите @username канала или его id (бот должен быть админом канала).",
-        reply_markup=_cancel_kb(),
+        "Шаг 5. Куда опубликовать конкурс? Выберите канал:",
+        reply_markup=kb,
     )
 
 
-@router.message(NewGiveaway.post_channel)
-async def step_post_channel(message: Message, state: FSMContext) -> None:
+async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot) -> None:
+    """Создаёт конкурс в БД и публикует пост. message — для ответа пользователю."""
     from datetime import datetime
-    raw = (message.text or "").strip()
-    target = raw if raw.startswith("@") else (int(raw) if raw.lstrip("-").isdigit() else "@" + raw)
-
-    try:
-        chat = await message.bot.get_chat(target)
-        member = await message.bot.get_chat_member(chat.id, message.bot.id)
-        if member.status not in ("administrator", "creator"):
-            await message.answer("Я не админ этого канала. Добавьте меня и пришлите снова.")
-            return
-    except Exception as e:
-        logger.warning("Канал публикации не найден: %s", e)
-        await message.answer("Не нашёл канал. Проверьте данные и права бота.")
-        return
-
     data = await state.get_data()
     finish_at = datetime.fromisoformat(data["finish_at"])
 
-    # 1. Создаём конкурс в БД
     async with session_factory() as session:
         g = await crud.create_giveaway(
             session,
@@ -185,7 +211,6 @@ async def step_post_channel(message: Message, state: FSMContext) -> None:
             created_by=message.from_user.id,
         )
 
-    # 2. Публикуем пост с кнопкой «Участвовать»
     cond = ""
     if data.get("require_channel_id"):
         cond = f"\n\n📌 Условие: подписка на {data['require_channel_title']}"
@@ -194,21 +219,59 @@ async def step_post_channel(message: Message, state: FSMContext) -> None:
         f"🏆 Победителей: {data['winners']}\n"
         f"⏰ Итоги: {to_local_str(finish_at)} (МСК)"
     )
-    sent = await message.bot.send_message(
+    sent = await bot.send_message(
         chat.id, post_text, reply_markup=_participate_kb(g.id, 0)
     )
-
-    # 3. Запоминаем координаты поста и ставим таймер завершения
     async with session_factory() as session:
         await crud.set_giveaway_post(session, g.id, chat.id, sent.message_id)
-    gv.schedule_giveaway_finish(message.bot, g.id, finish_at)
+    gv.schedule_giveaway_finish(bot, g.id, finish_at)
 
     await state.clear()
     await message.answer(
         f"✅ Конкурс #{g.id} опубликован в <b>{chat.title or chat.id}</b>.\n"
-        f"Итоги автоматически в {to_local_str(finish_at)} (МСК).\n\n"
-        f"Досрочно подвести итоги: /endgiveaway {g.id}"
+        f"Итоги в {to_local_str(finish_at)} (МСК).\n\n"
+        f"Досрочно: /endgiveaway {g.id}"
     )
+
+
+@router.callback_query(NewGiveaway.post_channel, F.data.startswith("gvpost:"))
+async def cb_post_channel(callback: CallbackQuery, state: FSMContext) -> None:
+    chat_id = int(callback.data.split(":")[1])
+    try:
+        chat = await callback.bot.get_chat(chat_id)
+    except Exception:
+        await callback.answer("Не удалось открыть канал.", show_alert=True)
+        return
+    await callback.message.edit_text("Публикую конкурс…")
+    await _finalize_giveaway(callback.message.model_copy(
+        update={"from_user": callback.from_user}), state, chat, callback.bot)
+    await callback.answer()
+
+
+@router.callback_query(NewGiveaway.post_channel, F.data == "gvpost_manual")
+async def cb_post_manual(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.message.edit_text(
+        "Пришлите @username канала публикации.", reply_markup=_cancel_kb(),
+    )
+    await callback.answer()
+
+
+@router.message(NewGiveaway.post_channel)
+async def step_post_channel(message: Message, state: FSMContext) -> None:
+    """Ручной ввод канала публикации."""
+    raw = (message.text or "").strip()
+    target = raw if raw.startswith("@") else (int(raw) if raw.lstrip("-").isdigit() else "@" + raw)
+    try:
+        chat = await message.bot.get_chat(target)
+        member = await message.bot.get_chat_member(chat.id, message.bot.id)
+        if member.status not in ("administrator", "creator"):
+            await message.answer("Я не админ этого канала. Добавьте меня и пришлите снова.")
+            return
+    except Exception as e:
+        logger.warning("Канал публикации не найден: %s", e)
+        await message.answer("Не нашёл канал. Проверьте данные и права бота.")
+        return
+    await _finalize_giveaway(message, state, chat, message.bot)
 
 
 @router.message(Command("endgiveaway"))
