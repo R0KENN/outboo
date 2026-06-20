@@ -74,7 +74,9 @@ async def moderate_message(
                 return
 
         # 2. Антиспам
-        if cfg.antispam_enabled and await antispam.check_spam(session, message, chat_id):
+        if cfg.antispam_enabled and await antispam.check_spam(
+            session, message, chat_id, block_mentions=cfg.block_mentions,
+        ):
             try:
                 await message.delete()
                 await crud.bump_stat(session, chat_id, "deleted_spam")

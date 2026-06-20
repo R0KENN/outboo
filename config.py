@@ -1,6 +1,6 @@
 """Загрузка и валидация конфигурации из .env."""
 from pathlib import Path
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,11 +24,22 @@ class Settings(BaseSettings):
     log_file: str = Field(default="logs/bot.log", alias="LOG_FILE")
 
     throttle_rate: float = Field(default=0.7, alias="THROTTLE_RATE")
+    auto_init_db: bool = Field(default=True, alias="AUTO_INIT_DB")
 
     bot_admins: str = Field(default="", alias="BOT_ADMINS")
 
     google_creds_path: str = Field(default="", alias="GOOGLE_CREDS_PATH")
     google_sheet_id: str = Field(default="", alias="GOOGLE_SHEET_ID")
+
+    @field_validator("bot_token")
+    @classmethod
+    def _check_token(cls, v: str) -> str:
+        if ":" not in v or not v.split(":", 1)[0].isdigit():
+            raise ValueError(
+                "BOT_TOKEN имеет неверный формат "
+                "(ожидается вид '123456789:ABC-DEF...')."
+            )
+        return v
 
     @property
     def admin_ids(self) -> set[int]:

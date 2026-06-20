@@ -39,8 +39,12 @@ async def main() -> None:
     logger.info("Запуск бота…")
 
     # Инициализация БД. В проде структуру лучше накатывать через Alembic
-    # (alembic upgrade head); init_models удобен для первого локального старта.
-    await init_models()
+    # (alembic upgrade head). При AUTO_INIT_DB=false create_all не вызывается,
+    # чтобы схема не расходилась с миграциями.
+    if settings.auto_init_db:
+        await init_models()
+    else:
+        logger.info("AUTO_INIT_DB=false — схема управляется через Alembic.")
 
     bot = Bot(
         token=settings.bot_token,

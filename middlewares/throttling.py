@@ -30,13 +30,27 @@ class ThrottlingMiddleware(BaseMiddleware):
         if event.from_user is None:
             return await handler(event, data)
 
+        # В группах/супергруппах базовый троттлинг НЕ применяем: иначе он
+        # глушит сообщения спамеров до того, как их увидит автомодерация.
+        # Частоту в группах ограничивает настраиваемый per-chat антифлуд
+        # (services.antiflood.flood_tracker внутри handlers/moderation.py).
+        if event.chat.type != "private":
+            return await handler(event, data)
+
         user_id = event.from_user.id
         now = time.monotonic()
 
         if now - self._last_time[user_id] < self.rate_limit:
-            # Слишком часто — глушим базовый троттлинг (не путать с
-            # настраиваемым per-chat антифлудом, который добавим в Этапе 1)
+            # Слишком частые сообщения/нажатия в личке — глушим.
             return None
 
         self._last_time[user_id] = now
+
+        # Защита от неограниченного роста словаря в долгоживущем процессе.
+        if len(self._last_time) > 10_000:
+            cutoff = now - max(self.rate_limit * 10, 60)
+            stale = [u for u, t in self._last_time.items() if t < cutoff]
+            for u in stale:
+                del self._last_time[u]
+
         return await handler(event, data)

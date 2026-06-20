@@ -32,6 +32,10 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
             callback_data=f"set:toggle:antispam_enabled:{cid}",
         ))
         b.row(InlineKeyboardButton(
+            text=f"@-упоминания каналов: {'блок' if cfg.block_mentions else 'разрешены'}",
+            callback_data=f"set:toggle:block_mentions:{cfg.chat_id}",
+        ))
+        b.row(InlineKeyboardButton(
             text=f"{_mark(cfg.antimat_enabled)} Антимат",
             callback_data=f"set:toggle:antimat_enabled:{cid}",
         ))

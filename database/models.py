@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text,
-    UniqueConstraint, func,
+    UniqueConstraint, func, false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,11 @@ class ChatSettings(Base):
     antispam_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     antimat_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     antiflood_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Блокировать @-упоминания каналов/ботов как спам (по умолчанию выкл,
+    # чтобы обычные упоминания людей по @нику не удалялись).
+    block_mentions: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
     captcha_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     welcome_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     clean_service_msgs: Mapped[bool] = mapped_column(Boolean, default=False)
