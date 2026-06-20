@@ -165,3 +165,22 @@ async def cmd_warns(message: Message) -> None:
     async with session_factory() as session:
         count = await ma.get_warns(session, message.chat.id, target_id)
     await message.answer(f"{name}: предупреждений — {count}.")
+
+@router.message(Command("resetwarns"))
+async def cmd_resetwarns(
+    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+) -> None:
+    """Полный сброс предупреждений участника (требует право warn)."""
+    if not _allowed("warn", is_admin, mod_permissions):
+        await message.answer("У вас нет права снимать предупреждения.")
+        return
+    if _need_reply(message):
+        await message.answer("Ответьте на сообщение пользователя.")
+        return
+    target_id, name = get_target_id(message)
+    async with session_factory() as session:
+        ok = await ma.reset_warns(session, message.chat.id, target_id)
+    await message.answer(
+        f"{name}: все предупреждения сняты." if ok
+        else f"{name}: предупреждений не было."
+    )

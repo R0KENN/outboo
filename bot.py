@@ -12,7 +12,6 @@ from handlers import start
 from middlewares.admin_check import AdminCheckMiddleware
 from middlewares.throttling import ThrottlingMiddleware
 from utils.logger import setup_logging
-from handlers import start
 from handlers import mod_commands, moderation, newcomers, posting
 from handlers import stats, admin as admin_handler
 from handlers import settings as settings_handler

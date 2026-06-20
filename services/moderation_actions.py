@@ -187,3 +187,16 @@ async def get_warns(
     stmt = select(Warn).where(Warn.chat_id == chat_id, Warn.user_id == user_id)
     warn = (await session.execute(stmt)).scalar_one_or_none()
     return warn.count if warn else 0
+
+async def reset_warns(
+    session: AsyncSession, chat_id: int, user_id: int,
+) -> bool:
+    """Полностью обнуляет счётчик варнов участника. True, если запись была."""
+    stmt = select(Warn).where(Warn.chat_id == chat_id, Warn.user_id == user_id)
+    warn = (await session.execute(stmt)).scalar_one_or_none()
+    if warn is None or warn.count == 0:
+        return False
+    warn.count = 0
+    warn.history = "[]"
+    await session.commit()
+    return True

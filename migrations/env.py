@@ -29,8 +29,12 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
+# подключаем модели проекта, чтобы Alembic видел все таблицы
+from database.engine import Base
+from database import models  # noqa: F401  (регистрация моделей в метаданных)
+
 target_metadata = Base.metadata
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
