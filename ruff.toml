@@ -1,0 +1,24 @@
+# Конфигурация ruff — линтер и форматтер (заменяет flake8 + black + isort)
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (неиспользуемые импорты, переменные)
+    "I",    # isort (порядок импортов)
+    "UP",   # pyupgrade (современный синтаксис)
+    "B",    # flake8-bugbear (типовые баги)
+    "W",    # warnings
+]
+ignore = [
+    "E501",  # длина строки — контролируем форматтером, не падаем на длинных строках
+    "B008",  # вызовы в дефолтах аргументов (часто нужно в aiogram-фильтрах)
+]
+
+[lint.per-file-ignores]
+"migrations/*" = ["E", "F", "I", "UP", "B"]  # автогенерённые миграции не трогаем
+
+[format]
+quote-style = "double"
+indent-style = "space"

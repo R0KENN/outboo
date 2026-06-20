@@ -3,6 +3,7 @@
 Поддерживается два типа: простая кнопка 'Я не бот' и математический вопрос.
 Состояние ожидающих проверки хранится в памяти процесса.
 """
+
 import random
 import time
 from dataclasses import dataclass, field
@@ -14,10 +15,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 @dataclass
 class PendingCaptcha:
     """Данные об ожидающем проверки новичке."""
+
     user_id: int
     chat_id: int
-    correct: str           # правильный ответ (для math) или 'ok' (для button)
-    join_message_id: int   # id служебного сообщения о входе (чтобы удалить)
+    correct: str  # правильный ответ (для math) или 'ok' (для button)
+    join_message_id: int  # id служебного сообщения о входе (чтобы удалить)
     prompt_message_id: int = 0  # id сообщения с капчей
     created_at: float = field(default_factory=time.monotonic)
 
@@ -30,10 +32,12 @@ def build_button_captcha(chat_id: int, user_id: int) -> tuple[str, InlineKeyboar
     """Капча-кнопка. Возвращает (текст, клавиатура, правильный_ответ)."""
     text = "Подтвердите, что вы не бот:"
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(
-        text="✅ Я не бот",
-        callback_data=f"captcha:ok:{chat_id}:{user_id}",
-    ))
+    b.row(
+        InlineKeyboardButton(
+            text="✅ Я не бот",
+            callback_data=f"captcha:ok:{chat_id}:{user_id}",
+        )
+    )
     return text, b.as_markup(), "ok"
 
 

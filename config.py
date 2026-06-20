@@ -1,13 +1,13 @@
 """Загрузка и валидация конфигурации из .env."""
+
 from pathlib import Path
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     bot_token: str = Field(alias="BOT_TOKEN")
 
@@ -36,8 +36,7 @@ class Settings(BaseSettings):
     def _check_token(cls, v: str) -> str:
         if ":" not in v or not v.split(":", 1)[0].isdigit():
             raise ValueError(
-                "BOT_TOKEN имеет неверный формат "
-                "(ожидается вид '123456789:ABC-DEF...')."
+                "BOT_TOKEN имеет неверный формат (ожидается вид '123456789:ABC-DEF...')."
             )
         return v
 
@@ -45,7 +44,8 @@ class Settings(BaseSettings):
     def admin_ids(self) -> set[int]:
         """Множество id владельцев бота (для команд в личке)."""
         return {
-            int(x) for x in self.bot_admins.replace(" ", "").split(",")
+            int(x)
+            for x in self.bot_admins.replace(" ", "").split(",")
             if x.strip().lstrip("-").isdigit()
         }
 

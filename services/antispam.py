@@ -1,10 +1,11 @@
 """Фильтрация контента: антиспам (ссылки/форварды) и антимат (раздел 4.1)."""
+
 import re
 
+from aiogram.types import Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from aiogram.types import Message
 from database.models import AllowedDomain, StopWord
 
 # Регулярка для поиска ссылок и упоминаний
@@ -15,12 +16,31 @@ URL_PATTERN = re.compile(
 DOMAIN_PATTERN = re.compile(r"(?:https?://)?(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})")
 
 # Таблица для нормализации обхода антимата (leet и латиница→кириллица)
-LEET_MAP = str.maketrans({
-    "0": "о", "o": "о", "@": "а", "a": "а", "4": "ч",
-    "3": "е", "e": "е", "1": "и", "!": "и", "c": "с", "p": "р",
-    "x": "х", "y": "у", "k": "к", "h": "н", "b": "в", "t": "т",
-    "m": "м", "$": "с", "6": "б", "9": "д",
-})
+LEET_MAP = str.maketrans(
+    {
+        "0": "о",
+        "o": "о",
+        "@": "а",
+        "a": "а",
+        "4": "ч",
+        "3": "е",
+        "e": "е",
+        "1": "и",
+        "!": "и",
+        "c": "с",
+        "p": "р",
+        "x": "х",
+        "y": "у",
+        "k": "к",
+        "h": "н",
+        "b": "в",
+        "t": "т",
+        "m": "м",
+        "$": "с",
+        "6": "б",
+        "9": "д",
+    }
+)
 
 
 async def get_allowed_domains(session: AsyncSession, chat_id: int) -> set[str]:
@@ -53,7 +73,7 @@ def normalize_text(text: str) -> str:
 
 def contains_link(message: Message) -> bool:
     """Проверяет, есть ли в сообщении ссылка/упоминание канала."""
-    text = (message.text or message.caption or "")
+    text = message.text or message.caption or ""
     if URL_PATTERN.search(text):
         return True
     # Ссылки могут быть и в entities (например, скрытые в тексте)
@@ -63,9 +83,10 @@ def contains_link(message: Message) -> bool:
             return True
     return False
 
+
 def has_url(message: Message) -> bool:
     """Есть ли в сообщении настоящая ссылка (http/t.me/www или url-entity)."""
-    text = (message.text or message.caption or "")
+    text = message.text or message.caption or ""
     if re.search(r"(https?://\S+|www\.\S+|t\.me/\S+)", text, re.IGNORECASE):
         return True
     entities = (message.entities or []) + (message.caption_entities or [])
@@ -74,11 +95,12 @@ def has_url(message: Message) -> bool:
 
 def has_channel_mention(message: Message) -> bool:
     """Есть ли @-упоминание (потенциально канала/бота)."""
-    text = (message.text or message.caption or "")
+    text = message.text or message.caption or ""
     if re.search(r"@[a-zA-Z][a-zA-Z0-9_]{4,}", text):
         return True
     entities = (message.entities or []) + (message.caption_entities or [])
     return any(ent.type == "mention" for ent in entities)
+
 
 def is_forwarded(message: Message) -> bool:
     """Проверяет, переслано ли сообщение из другого чата/канала."""
@@ -93,8 +115,11 @@ def extract_domains(text: str) -> set[str]:
     """Извлекает домены из текста для сверки с белым списком."""
     return {m.group(1).lower() for m in DOMAIN_PATTERN.finditer(text)}
 
+
 async def check_spam(
-    session: AsyncSession, message: Message, chat_id: int,
+    session: AsyncSession,
+    message: Message,
+    chat_id: int,
     block_mentions: bool = False,
 ) -> bool:
     """True, если сообщение нужно удалить как спам.
@@ -106,7 +131,7 @@ async def check_spam(
         return True
 
     if has_url(message):
-        text = (message.text or message.caption or "")
+        text = message.text or message.caption or ""
         domains = extract_domains(text)
         allowed = await get_allowed_domains(session, chat_id)
         # Если домен не извлёкся или хоть один вне белого списка — спам.
@@ -118,8 +143,11 @@ async def check_spam(
 
     return False
 
+
 async def check_profanity(
-    session: AsyncSession, message: Message, chat_id: int,
+    session: AsyncSession,
+    message: Message,
+    chat_id: int,
 ) -> bool:
     """True, если в сообщении есть стоп-слово (с учётом обхода).
 
@@ -129,7 +157,7 @@ async def check_profanity(
       2) нормализованный текст без разделителей — ловит обходы вида
          'с п а м', 'сп@м', 'с-п-а-м'.
     """
-    text = (message.text or message.caption or "")
+    text = message.text or message.caption or ""
     if not text:
         return False
 

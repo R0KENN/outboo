@@ -3,11 +3,12 @@
 Вся навигация ведётся через инлайн-меню (кнопка «Главное меню» по /start).
 Для админов в группах сохраняем рабочие команды модерации.
 """
+
 from aiogram import Bot
 from aiogram.types import (
     BotCommand,
-    BotCommandScopeAllPrivateChats,
     BotCommandScopeAllChatAdministrators,
+    BotCommandScopeAllPrivateChats,
 )
 
 
@@ -32,9 +33,5 @@ async def set_bot_commands(bot: Bot) -> None:
         BotCommand(command="log", description="Журнал модерации"),
     ]
 
-    await bot.set_my_commands(
-        private_commands, scope=BotCommandScopeAllPrivateChats()
-    )
-    await bot.set_my_commands(
-        admin_commands, scope=BotCommandScopeAllChatAdministrators()
-    )
+    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_my_commands(admin_commands, scope=BotCommandScopeAllChatAdministrators())

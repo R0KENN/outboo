@@ -1,4 +1,5 @@
 """Главное reply-меню в личке с ботом."""
+
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 

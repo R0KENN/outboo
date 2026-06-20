@@ -7,6 +7,7 @@ asyncio.to_thread, чтобы не блокировать event loop бота.
 Каждый набор данных пишется на свой лист (worksheet): лист полностью
 очищается и перезаписывается актуальными данными.
 """
+
 import asyncio
 import logging
 
@@ -29,6 +30,7 @@ def is_configured() -> bool:
 def _get_spreadsheet():
     """Синхронно открывает таблицу по id. Вызывается внутри to_thread."""
     import gspread
+
     gc = gspread.service_account(filename=settings.google_creds_path)
     return gc.open_by_key(settings.google_sheet_id)
 
@@ -55,9 +57,11 @@ async def write_worksheet(title: str, header: list[str], rows: list[list]) -> in
 
 async def check_connection() -> str:
     """Проверяет доступ к таблице. Возвращает её название или текст ошибки."""
+
     def _check():
         ss = _get_spreadsheet()
         return ss.title
+
     try:
         return await asyncio.to_thread(_check)
     except Exception as e:

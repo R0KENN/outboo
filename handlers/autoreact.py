@@ -8,19 +8,25 @@
 - историю канала Bot API не отдаёт — простановка на старые посты делается
   командой /reactrange по диапазону message_id (см. ниже в этом файле).
 """
+
 import logging
 import random
 
-from aiogram import Bot, F, Router
+from aiogram import Bot, Router
 from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import (
-    Message, MessageReactionUpdated,
-    ReactionTypeEmoji, ReactionTypeCustomEmoji,
+    Message,
+    MessageReactionUpdated,
+    ReactionTypeCustomEmoji,
+    ReactionTypeEmoji,
 )
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import settings as app_settings
-from database.crud import get_or_create_chat_settings, get_managed_chat
+from database.crud import get_or_create_chat_settings
 from database.engine import session_factory
 
 logger = logging.getLogger(__name__)
@@ -52,8 +58,7 @@ async def _apply_reaction(bot: Bot, chat_id: int, message_id: int, cfg) -> bool:
         )
         return True
     except Exception as e:
-        logger.warning("Автореакция в %s/%s не поставлена: %s",
-                       chat_id, message_id, e)
+        logger.warning("Автореакция в %s/%s не поставлена: %s", chat_id, message_id, e)
         return False
 
 
@@ -83,7 +88,8 @@ async def join_custom_reaction(update: MessageReactionUpdated, bot: Bot) -> None
 
     # Ищем среди новых реакций кастомную (премиум-эмодзи).
     custom_ids = [
-        r.custom_emoji_id for r in (update.new_reaction or [])
+        r.custom_emoji_id
+        for r in (update.new_reaction or [])
         if isinstance(r, ReactionTypeCustomEmoji)
     ]
     if not custom_ids:
@@ -96,8 +102,12 @@ async def join_custom_reaction(update: MessageReactionUpdated, bot: Bot) -> None
             reaction=[ReactionTypeCustomEmoji(custom_emoji_id=custom_ids[0])],
         )
     except Exception as e:
-        logger.warning("Не удалось присоединиться к кастом-реакции в %s/%s: %s",
-                       update.chat.id, update.message_id, e)
+        logger.warning(
+            "Не удалось присоединиться к кастом-реакции в %s/%s: %s",
+            update.chat.id,
+            update.message_id,
+            e,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -108,8 +118,7 @@ async def _is_channel_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
         return True
     try:
         m = await bot.get_chat_member(chat_id, user_id)
-        return m.status in (ChatMemberStatus.ADMINISTRATOR,
-                            ChatMemberStatus.CREATOR)
+        return m.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR)
     except Exception:
         return False
 
@@ -166,18 +175,77 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
         "Это может занять время (Telegram ограничивает частоту)."
     )
 
-    import asyncio
+    from utils.rate_limit import safe_call
+    import random as _random
+    from aiogram.types import ReactionTypeEmoji as _RTE
+
+    emojis = _parse_emojis(cfg.autoreact_emojis)
     ok = 0
     fail = 0
     for mid in range(from_id, to_id + 1):
-        done = await _apply_reaction(bot, chat.id, mid, cfg)
-        if done:
+        chosen = _random.choice(emojis)
+        result = await safe_call(
+            lambda m=mid, e=chosen: bot.set_message_reaction(
+                chat_id=chat.id, message_id=m, reaction=[_RTE(emoji=e)],
+            ),
+            delay=0.2,
+        )
+        if result is not None:
             ok += 1
         else:
             fail += 1
-        await asyncio.sleep(0.3)  # бережём лимиты Telegram
 
     await message.answer(
-        f"Готово. Поставлено: <b>{ok}</b>. "
-        f"Пропущено (нет поста/нельзя): <b>{fail}</b>."
+        f"Готово. Поставлено: <b>{ok}</b>. Пропущено (нет поста/нельзя): <b>{fail}</b>."
     )
+
+class ReactRangeFSM(StatesGroup):
+    waiting_range = State()
+
+
+@router.callback_query(F.data.startswith("react:oldposts:"))
+async def cb_react_oldposts(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопка из карточки канала: просим прислать диапазон id."""
+    chat_id = int(callback.data.split(":")[2])
+    if not await _is_channel_admin(callback.bot, chat_id, callback.from_user.id):
+        await callback.answer("Только для администраторов канала.", show_alert=True)
+        return
+
+    await state.set_state(ReactRangeFSM.waiting_range)
+    await state.update_data(react_chat_id=chat_id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⬅️ Отмена", callback_data="react:cancel")
+    ]])
+    await callback.message.edit_text(
+        "🔁 <b>Реакции на старые посты</b>\n\n"
+        "Пришлите диапазон id постов через пробел: <code>from to</code>\n"
+        "Например: <code>100 250</code>\n\n"
+        "id поста виден в его ссылке: t.me/канал/<b>123</b> → id = 123.\n"
+        "За раз — не больше 500 постов.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(ReactRangeFSM.waiting_range, F.data == "react:cancel")
+async def cb_react_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text("Отменено.")
+    await callback.answer()
+
+
+@router.message(ReactRangeFSM.waiting_range)
+async def step_react_range(message: Message, bot: Bot, state: FSMContext) -> None:
+    """Принимает диапазон и запускает простановку реакций."""
+    parts = (message.text or "").split()
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        await message.answer("Нужно два числа через пробел, например: 100 250")
+        return
+    from_id, to_id = int(parts[0]), int(parts[1])
+    data = await state.get_data()
+    chat_id = data.get("react_chat_id")
+    await state.clear()
+
+    # Переиспользуем логику команды: формируем фейковый текст и зовём cmd_reactrange
+    message.text = f"/reactrange {chat_id} {from_id} {to_id}"
+    await cmd_reactrange(message, bot)

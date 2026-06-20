@@ -1,12 +1,13 @@
 """Автоматическая модерация входящих сообщений (раздел 4.1)."""
+
 import logging
+from datetime import UTC, datetime
 
 from aiogram import Router
 from aiogram.types import Message
 
-from datetime import datetime, timezone
-from database.crud import get_or_create_chat_settings, get_join_time
 from database import crud
+from database.crud import get_join_time, get_or_create_chat_settings
 from database.engine import session_factory
 from services import antispam
 from services.antiflood import flood_tracker
@@ -39,11 +40,14 @@ async def moderate_message(
         if cfg.quarantine_enabled and cfg.newbie_quarantine_hours > 0:
             joined_at = await get_join_time(session, chat_id, user_id)
             if joined_at is not None:
-                age_hours = (datetime.now(timezone.utc) - joined_at).total_seconds() / 3600
+                age_hours = (datetime.now(UTC) - joined_at).total_seconds() / 3600
                 if age_hours < cfg.newbie_quarantine_hours:
                     has_media = bool(
-                        message.photo or message.video or message.document
-                        or message.audio or message.animation
+                        message.photo
+                        or message.video
+                        or message.document
+                        or message.audio
+                        or message.animation
                     )
                     is_forward = antispam.is_forwarded(message)
                     has_link = antispam.contains_link(message)
@@ -57,25 +61,34 @@ async def moderate_message(
         # 1. Антифлуд
         if cfg.antiflood_enabled:
             is_flood = flood_tracker.register(
-                chat_id, user_id, cfg.flood_messages, cfg.flood_seconds,
+                chat_id,
+                user_id,
+                cfg.flood_messages,
+                cfg.flood_seconds,
             )
             if is_flood:
                 flood_tracker.reset(chat_id, user_id)
                 try:
                     await mute_user(
-                        message.bot, session, chat_id, user_id,
-                        message.bot.id, cfg.flood_mute_seconds, "flood",
+                        message.bot,
+                        session,
+                        chat_id,
+                        user_id,
+                        message.bot.id,
+                        cfg.flood_mute_seconds,
+                        "flood",
                     )
-                    await message.answer(
-                        f"{message.from_user.full_name} замучен за флуд."
-                    )
+                    await message.answer(f"{message.from_user.full_name} замучен за флуд.")
                 except Exception as e:
                     logger.warning("Не удалось замутить за флуд: %s", e)
                 return
 
         # 2. Антиспам
         if cfg.antispam_enabled and await antispam.check_spam(
-            session, message, chat_id, block_mentions=cfg.block_mentions,
+            session,
+            message,
+            chat_id,
+            block_mentions=cfg.block_mentions,
         ):
             try:
                 await message.delete()
@@ -90,8 +103,12 @@ async def moderate_message(
                 await message.delete()
                 await crud.bump_stat(session, chat_id, "deleted_profanity")
                 count, limit, triggered = await add_warn(
-                    message.bot, session, chat_id, user_id,
-                    message.bot.id, "profanity",
+                    message.bot,
+                    session,
+                    chat_id,
+                    user_id,
+                    message.bot.id,
+                    "profanity",
                 )
                 note = (
                     f"{message.from_user.full_name}: предупреждение "

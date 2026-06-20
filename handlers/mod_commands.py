@@ -9,6 +9,7 @@
   warn/unwarn -> право "warn"
 Просмотр варнов (/warns) доступен любому модератору без отдельного права.
 """
+
 import logging
 
 from aiogram import Router
@@ -39,7 +40,9 @@ def _allowed(action: str, is_admin: bool, mod_permissions: set) -> bool:
 
 @router.message(Command("ban"))
 async def cmd_ban(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("ban", is_admin, mod_permissions):
         await message.answer("У вас нет права банить.")
@@ -55,7 +58,9 @@ async def cmd_ban(
 
 @router.message(Command("unban"))
 async def cmd_unban(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("ban", is_admin, mod_permissions):
         await message.answer("У вас нет права снимать бан.")
@@ -71,7 +76,9 @@ async def cmd_unban(
 
 @router.message(Command("kick"))
 async def cmd_kick(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("kick", is_admin, mod_permissions):
         await message.answer("У вас нет права кикать.")
@@ -87,7 +94,9 @@ async def cmd_kick(
 
 @router.message(Command("mute"))
 async def cmd_mute(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("mute", is_admin, mod_permissions):
         await message.answer("У вас нет права мутить.")
@@ -98,13 +107,17 @@ async def cmd_mute(
     target_id, name = get_target_id(message)
     seconds = parse_duration(message.text or "") or 3600  # по умолчанию 1 час
     async with session_factory() as session:
-        await ma.mute_user(message.bot, session, message.chat.id, target_id, message.from_user.id, seconds)
+        await ma.mute_user(
+            message.bot, session, message.chat.id, target_id, message.from_user.id, seconds
+        )
     await message.answer(f"{name} замучен на {seconds // 60} мин.")
 
 
 @router.message(Command("unmute"))
 async def cmd_unmute(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("mute", is_admin, mod_permissions):
         await message.answer("У вас нет права размучивать.")
@@ -120,7 +133,9 @@ async def cmd_unmute(
 
 @router.message(Command("warn"))
 async def cmd_warn(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("warn", is_admin, mod_permissions):
         await message.answer("У вас нет права выдавать предупреждения.")
@@ -131,7 +146,11 @@ async def cmd_warn(
     target_id, name = get_target_id(message)
     async with session_factory() as session:
         count, limit, triggered = await ma.add_warn(
-            message.bot, session, message.chat.id, target_id, message.from_user.id,
+            message.bot,
+            session,
+            message.chat.id,
+            target_id,
+            message.from_user.id,
         )
     if triggered:
         await message.answer(f"{name} достиг лимита {limit} — применено действие.")
@@ -141,7 +160,9 @@ async def cmd_warn(
 
 @router.message(Command("unwarn"))
 async def cmd_unwarn(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     if not _allowed("warn", is_admin, mod_permissions):
         await message.answer("У вас нет права снимать предупреждения.")
@@ -166,9 +187,12 @@ async def cmd_warns(message: Message) -> None:
         count = await ma.get_warns(session, message.chat.id, target_id)
     await message.answer(f"{name}: предупреждений — {count}.")
 
+
 @router.message(Command("resetwarns"))
 async def cmd_resetwarns(
-    message: Message, is_admin: bool = False, mod_permissions: set = frozenset(),
+    message: Message,
+    is_admin: bool = False,
+    mod_permissions: set = frozenset(),
 ) -> None:
     """Полный сброс предупреждений участника (требует право warn)."""
     if not _allowed("warn", is_admin, mod_permissions):
@@ -181,6 +205,5 @@ async def cmd_resetwarns(
     async with session_factory() as session:
         ok = await ma.reset_warns(session, message.chat.id, target_id)
     await message.answer(
-        f"{name}: все предупреждения сняты." if ok
-        else f"{name}: предупреждений не было."
+        f"{name}: все предупреждения сняты." if ok else f"{name}: предупреждений не было."
     )

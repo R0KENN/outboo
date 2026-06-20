@@ -8,21 +8,25 @@
 
 Так задачи не теряются при рестарте бота: при старте просто заново читаем БД.
 """
-import asyncio
+
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot
 from aiogram.types import (
-    InlineKeyboardButton, InlineKeyboardMarkup,
-    InputMediaPhoto, InputMediaVideo, InputMediaDocument, InputMediaAudio,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaAudio,
+    InputMediaDocument,
+    InputMediaPhoto,
+    InputMediaVideo,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,8 @@ def _build_keyboard(buttons_json: str) -> InlineKeyboardMarkup | None:
     for row in rows:
         kb_row = [
             InlineKeyboardButton(text=btn["text"], url=btn["url"])
-            for btn in row if btn.get("text") and btn.get("url")
+            for btn in row
+            if btn.get("text") and btn.get("url")
         ]
         if kb_row:
             kb_rows.append(kb_row)
@@ -103,7 +108,9 @@ async def _publish_post(post_id: int) -> None:
         if not media:
             # Текстовый пост
             msg = await _bot.send_message(
-                channel_id, text, parse_mode=parse_mode,
+                channel_id,
+                text,
+                parse_mode=parse_mode,
                 reply_markup=keyboard,
                 disable_web_page_preview=False,
             )
@@ -114,8 +121,7 @@ async def _publish_post(post_id: int) -> None:
             item = media[0]
             mtype = item.get("type")
             file_id = item.get("file_id")
-            common = dict(caption=text or None, parse_mode=parse_mode,
-                          reply_markup=keyboard)
+            common = dict(caption=text or None, parse_mode=parse_mode, reply_markup=keyboard)
             if mtype == "photo":
                 msg = await _bot.send_photo(channel_id, file_id, **common)
             elif mtype == "video":
@@ -125,9 +131,9 @@ async def _publish_post(post_id: int) -> None:
             elif mtype == "audio":
                 msg = await _bot.send_audio(channel_id, file_id, **common)
             else:
-                msg = await _bot.send_message(channel_id, text,
-                                              parse_mode=parse_mode,
-                                              reply_markup=keyboard)
+                msg = await _bot.send_message(
+                    channel_id, text, parse_mode=parse_mode, reply_markup=keyboard
+                )
             sent_message_ids.append(msg.message_id)
 
         else:
@@ -147,7 +153,9 @@ async def _publish_post(post_id: int) -> None:
             # Кнопки отдельным сообщением, если они есть (в альбом их не вставить)
             if keyboard:
                 kb_msg = await _bot.send_message(
-                    channel_id, "⬆️", reply_markup=keyboard,
+                    channel_id,
+                    "⬆️",
+                    reply_markup=keyboard,
                 )
                 sent_message_ids.append(kb_msg.message_id)
 
@@ -164,18 +172,19 @@ async def _publish_post(post_id: int) -> None:
 
     # Автоудаление опубликованного поста через заданный интервал
     if delete_after and delete_after > 0 and sent_message_ids:
-        run_at = datetime.now(timezone.utc) + timedelta(seconds=delete_after)
+        run_at = datetime.now(UTC) + timedelta(seconds=delete_after)
         scheduler.add_job(
-            _delete_messages, trigger=DateTrigger(run_date=run_at),
+            _delete_messages,
+            trigger=DateTrigger(run_date=run_at),
             args=[channel_id, list(sent_message_ids)],
-            id=f"del:{post_id}", replace_existing=True,
+            id=f"del:{post_id}",
+            replace_existing=True,
         )
 
     # Повторяющиеся посты (премиум): создаём следующую копию
     if repeat_rule in ("daily", "weekly"):
         delta = timedelta(days=1) if repeat_rule == "daily" else timedelta(weeks=1)
-        next_time = (publish_at if publish_at.tzinfo
-                     else publish_at.replace(tzinfo=timezone.utc)) + delta
+        next_time = (publish_at if publish_at.tzinfo else publish_at.replace(tzinfo=UTC)) + delta
         async with session_factory() as session:
             new_post = await crud.create_scheduled_post(
                 session,
@@ -221,10 +230,13 @@ def _schedule_one(post_id: int, publish_at: datetime) -> None:
     чтобы публикация была точной по минуте.
     """
     if publish_at.tzinfo is None:
-        publish_at = publish_at.replace(tzinfo=timezone.utc)
+        publish_at = publish_at.replace(tzinfo=UTC)
     scheduler.add_job(
-        _publish_post, trigger=DateTrigger(run_date=publish_at),
-        args=[post_id], id=f"post:{post_id}", replace_existing=True,
+        _publish_post,
+        trigger=DateTrigger(run_date=publish_at),
+        args=[post_id],
+        id=f"post:{post_id}",
+        replace_existing=True,
     )
 
 
@@ -233,7 +245,7 @@ async def _scan_due_posts() -> None:
 
     Подстраховка на случай, если точечный job не сработал (рестарт и т.п.).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with session_factory() as session:
         due = await crud.list_due_posts(session, now)
         ids = [p.id for p in due]
@@ -252,8 +264,11 @@ def setup_scheduler(bot: Bot) -> None:
     _bot = bot
     # Периодический сканер раз в минуту
     scheduler.add_job(
-        _scan_due_posts, "interval", minutes=1,
-        id="scan_due_posts", replace_existing=True,
+        _scan_due_posts,
+        "interval",
+        minutes=1,
+        id="scan_due_posts",
+        replace_existing=True,
     )
     scheduler.start()
     logger.info("Планировщик запущен.")
@@ -267,8 +282,8 @@ async def restore_jobs() -> None:
     for post in posts:
         publish_at = post.publish_at
         if publish_at.tzinfo is None:
-            publish_at = publish_at.replace(tzinfo=timezone.utc)
-        if publish_at > datetime.now(timezone.utc):
+            publish_at = publish_at.replace(tzinfo=UTC)
+        if publish_at > datetime.now(UTC):
             _schedule_one(post.id, publish_at)
             count += 1
     logger.info("Восстановлено отложенных постов: %s", count)

@@ -1,13 +1,31 @@
 """Слой доступа к данным. Вся работа с БД — только здесь (раздел 3 ТЗ)."""
+from datetime import date as _date
+from datetime import datetime
+from datetime import datetime as _dt
+from datetime import timedelta as _timedelta
+
+from sqlalchemy import func as _func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import ChatSettings, Moderator
+from database.models import (
+    AllowedDomain,
+    ChatSettings,
+    Giveaway,
+    GiveawayParticipant,
+    ManagedChat,
+    MemberJoin,
+    ModerationLog,
+    Moderator,
+    Referral,
+    ScheduledPost,
+    Stat,
+    StopWord,
+    Subscriber,
+)
 
 
-async def get_or_create_chat_settings(
-    session: AsyncSession, chat_id: int
-) -> ChatSettings:
+async def get_or_create_chat_settings(session: AsyncSession, chat_id: int) -> ChatSettings:
     """Возвращает настройки чата, создавая запись со значениями по умолчанию."""
     obj = await session.get(ChatSettings, chat_id)
     if obj is None:
@@ -18,48 +36,32 @@ async def get_or_create_chat_settings(
     return obj
 
 
-async def get_moderator(
-    session: AsyncSession, chat_id: int, user_id: int
-) -> Moderator | None:
+async def get_moderator(session: AsyncSession, chat_id: int, user_id: int) -> Moderator | None:
     """Возвращает запись младшего модератора, если он назначен."""
-    stmt = select(Moderator).where(
-        Moderator.chat_id == chat_id, Moderator.user_id == user_id
-    )
+    stmt = select(Moderator).where(Moderator.chat_id == chat_id, Moderator.user_id == user_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
-
-from datetime import datetime, timezone
-from database.models import MemberJoin
 
 
 async def record_join(session: AsyncSession, chat_id: int, user_id: int) -> None:
     """Запоминает время входа участника (для карантина)."""
-    stmt = select(MemberJoin).where(
-        MemberJoin.chat_id == chat_id, MemberJoin.user_id == user_id
-    )
+    stmt = select(MemberJoin).where(MemberJoin.chat_id == chat_id, MemberJoin.user_id == user_id)
     existing = (await session.execute(stmt)).scalar_one_or_none()
     if existing is None:
         session.add(MemberJoin(chat_id=chat_id, user_id=user_id))
         await session.commit()
 
 
-async def get_join_time(
-    session: AsyncSession, chat_id: int, user_id: int
-) -> datetime | None:
+async def get_join_time(session: AsyncSession, chat_id: int, user_id: int) -> datetime | None:
     """Возвращает время входа участника или None, если запись не найдена."""
-    stmt = select(MemberJoin).where(
-        MemberJoin.chat_id == chat_id, MemberJoin.user_id == user_id
-    )
+    stmt = select(MemberJoin).where(MemberJoin.chat_id == chat_id, MemberJoin.user_id == user_id)
     row = (await session.execute(stmt)).scalar_one_or_none()
     return row.joined_at if row else None
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Отложенные посты (раздел 4.3 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
-from datetime import datetime as _dt
-from database.models import ScheduledPost
-
-
 async def create_scheduled_post(
     session: AsyncSession,
     channel_id: int,
@@ -73,7 +75,6 @@ async def create_scheduled_post(
     repeat_rule: str = "",
     batch_id: str = "",
 ) -> ScheduledPost:
-
     """Создаёт запись отложенного поста в очереди и возвращает её."""
     post = ScheduledPost(
         channel_id=channel_id,
@@ -98,13 +99,6 @@ async def get_post(session: AsyncSession, post_id: int) -> ScheduledPost | None:
     """Возвращает пост по id."""
     return await session.get(ScheduledPost, post_id)
 
-async def get_post(session, post_id: int):
-    """Возвращает запланированный пост по id или None."""
-    from database.models import ScheduledPost
-    from sqlalchemy import select
-    return (await session.execute(
-        select(ScheduledPost).where(ScheduledPost.id == post_id)
-    )).scalar_one_or_none()
 
 async def list_pending_posts(
     session: AsyncSession, created_by: int | None = None
@@ -126,9 +120,7 @@ async def list_due_posts(session: AsyncSession, now: _dt) -> list[ScheduledPost]
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def set_post_status(
-    session: AsyncSession, post_id: int, status: str
-) -> None:
+async def set_post_status(session: AsyncSession, post_id: int, status: str) -> None:
     """Меняет статус поста (sent|failed|cancelled|pending)."""
     post = await session.get(ScheduledPost, post_id)
     if post is not None:
@@ -146,9 +138,7 @@ async def cancel_post(session: AsyncSession, post_id: int) -> bool:
     return True
 
 
-async def reschedule_post(
-    session: AsyncSession, post_id: int, new_time: _dt
-) -> bool:
+async def reschedule_post(session: AsyncSession, post_id: int, new_time: _dt) -> bool:
     """Переносит время публикации pending-поста. True при успехе."""
     post = await session.get(ScheduledPost, post_id)
     if post is None or post.status != "pending":
@@ -156,6 +146,7 @@ async def reschedule_post(
     post.publish_at = new_time
     await session.commit()
     return True
+
 
 async def list_pending_grouped(
     session: AsyncSession, created_by: int | None = None
@@ -194,26 +185,19 @@ async def cancel_batch(session: AsyncSession, batch_id: str) -> list[int]:
         await session.commit()
     return cancelled
 
+
 # ──────────────────────────────────────────────────────────────────────────
 # Статистика (раздел 4.5 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
-from datetime import date as _date, timedelta as _timedelta
-from sqlalchemy import func as _func
-from database.models import Stat, Moderator, StopWord, AllowedDomain, ModerationLog
 
-
-async def bump_stat(
-    session: AsyncSession, chat_id: int, metric: str, amount: int = 1
-) -> None:
+async def bump_stat(session: AsyncSession, chat_id: int, metric: str, amount: int = 1) -> None:
     """Увеличивает счётчик метрики за сегодня. Переносимый upsert (select+update).
 
     metric: new_members | deleted_spam | deleted_profanity | bans | mutes |
             warns | messages | ...
     """
     today = _date.today().isoformat()
-    stmt = select(Stat).where(
-        Stat.chat_id == chat_id, Stat.date == today, Stat.metric == metric
-    )
+    stmt = select(Stat).where(Stat.chat_id == chat_id, Stat.date == today, Stat.metric == metric)
     row = (await session.execute(stmt)).scalar_one_or_none()
     if row is None:
         session.add(Stat(chat_id=chat_id, date=today, metric=metric, value=amount))
@@ -222,9 +206,7 @@ async def bump_stat(
     await session.commit()
 
 
-async def get_stats_period(
-    session: AsyncSession, chat_id: int, days: int
-) -> dict[str, int]:
+async def get_stats_period(session: AsyncSession, chat_id: int, days: int) -> dict[str, int]:
     """Суммирует метрики за последние N дней. Возвращает {metric: сумма}."""
     since = (_date.today() - _timedelta(days=days - 1)).isoformat()
     stmt = (
@@ -243,9 +225,7 @@ async def add_moderator(
     session: AsyncSession, chat_id: int, user_id: int, permissions: str
 ) -> Moderator:
     """Назначает (или обновляет права) младшего модератора."""
-    stmt = select(Moderator).where(
-        Moderator.chat_id == chat_id, Moderator.user_id == user_id
-    )
+    stmt = select(Moderator).where(Moderator.chat_id == chat_id, Moderator.user_id == user_id)
     mod = (await session.execute(stmt)).scalar_one_or_none()
     if mod is None:
         mod = Moderator(chat_id=chat_id, user_id=user_id, permissions=permissions)
@@ -257,13 +237,9 @@ async def add_moderator(
     return mod
 
 
-async def remove_moderator(
-    session: AsyncSession, chat_id: int, user_id: int
-) -> bool:
+async def remove_moderator(session: AsyncSession, chat_id: int, user_id: int) -> bool:
     """Снимает модератора. True, если запись существовала."""
-    stmt = select(Moderator).where(
-        Moderator.chat_id == chat_id, Moderator.user_id == user_id
-    )
+    stmt = select(Moderator).where(Moderator.chat_id == chat_id, Moderator.user_id == user_id)
     mod = (await session.execute(stmt)).scalar_one_or_none()
     if mod is None:
         return False
@@ -272,9 +248,7 @@ async def remove_moderator(
     return True
 
 
-async def list_moderators(
-    session: AsyncSession, chat_id: int
-) -> list[Moderator]:
+async def list_moderators(session: AsyncSession, chat_id: int) -> list[Moderator]:
     """Список модераторов чата."""
     stmt = select(Moderator).where(Moderator.chat_id == chat_id)
     return list((await session.execute(stmt)).scalars().all())
@@ -288,9 +262,7 @@ async def add_stopword(session: AsyncSession, chat_id: int, word: str) -> bool:
     word = word.lower().strip()
     if not word:
         return False
-    stmt = select(StopWord).where(
-        StopWord.chat_id == chat_id, StopWord.word == word
-    )
+    stmt = select(StopWord).where(StopWord.chat_id == chat_id, StopWord.word == word)
     if (await session.execute(stmt)).scalar_one_or_none() is not None:
         return False
     session.add(StopWord(chat_id=chat_id, word=word))
@@ -301,9 +273,7 @@ async def add_stopword(session: AsyncSession, chat_id: int, word: str) -> bool:
 async def remove_stopword(session: AsyncSession, chat_id: int, word: str) -> bool:
     """Удаляет стоп-слово. True, если оно было."""
     word = word.lower().strip()
-    stmt = select(StopWord).where(
-        StopWord.chat_id == chat_id, StopWord.word == word
-    )
+    stmt = select(StopWord).where(StopWord.chat_id == chat_id, StopWord.word == word)
     obj = (await session.execute(stmt)).scalar_one_or_none()
     if obj is None:
         return False
@@ -323,7 +293,14 @@ async def list_stopwords(session: AsyncSession, chat_id: int) -> list[str]:
 # ──────────────────────────────────────────────────────────────────────────
 async def add_domain(session: AsyncSession, chat_id: int, domain: str) -> bool:
     """Добавляет домен в белый список. False, если он уже есть."""
-    domain = domain.lower().strip().lstrip("@").removeprefix("https://").removeprefix("http://").removeprefix("www.")
+    domain = (
+        domain.lower()
+        .strip()
+        .lstrip("@")
+        .removeprefix("https://")
+        .removeprefix("http://")
+        .removeprefix("www.")
+    )
     domain = domain.split("/")[0]
     if not domain:
         return False
@@ -339,7 +316,14 @@ async def add_domain(session: AsyncSession, chat_id: int, domain: str) -> bool:
 
 async def remove_domain(session: AsyncSession, chat_id: int, domain: str) -> bool:
     """Удаляет домен из белого списка. True, если он был."""
-    domain = domain.lower().strip().lstrip("@").removeprefix("https://").removeprefix("http://").removeprefix("www.")
+    domain = (
+        domain.lower()
+        .strip()
+        .lstrip("@")
+        .removeprefix("https://")
+        .removeprefix("http://")
+        .removeprefix("www.")
+    )
     domain = domain.split("/")[0]
     stmt = select(AllowedDomain).where(
         AllowedDomain.chat_id == chat_id, AllowedDomain.domain == domain
@@ -373,11 +357,10 @@ async def get_moderation_log(
     )
     return list((await session.execute(stmt)).scalars().all())
 
+
 # ──────────────────────────────────────────────────────────────────────────
 # База подписчиков и рассылки (раздел 4.6 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
-from database.models import Subscriber
-
 
 async def upsert_subscriber(
     session: AsyncSession,
@@ -393,8 +376,10 @@ async def upsert_subscriber(
     sub = await session.get(Subscriber, user_id)
     if sub is None:
         sub = Subscriber(
-            user_id=user_id, username=username or "",
-            full_name=full_name or "", is_active=True,
+            user_id=user_id,
+            username=username or "",
+            full_name=full_name or "",
+            is_active=True,
         )
         session.add(sub)
     else:
@@ -420,24 +405,21 @@ async def deactivate_subscriber(session: AsyncSession, user_id: int) -> None:
 
 async def count_subscribers(session: AsyncSession) -> tuple[int, int]:
     """Возвращает (всего, активных) подписчиков."""
-    total = (await session.execute(
-        select(_func.count()).select_from(Subscriber)
-    )).scalar_one()
-    active = (await session.execute(
-        select(_func.count()).select_from(Subscriber)
-        .where(Subscriber.is_active.is_(True))
-    )).scalar_one()
+    total = (await session.execute(select(_func.count()).select_from(Subscriber))).scalar_one()
+    active = (
+        await session.execute(
+            select(_func.count()).select_from(Subscriber).where(Subscriber.is_active.is_(True))
+        )
+    ).scalar_one()
     return int(total), int(active)
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Реферальная система (раздел 4.6 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
-from database.models import Referral
 
 
-async def register_referral(
-    session: AsyncSession, invited_id: int, referrer_id: int
-) -> bool:
+async def register_referral(session: AsyncSession, invited_id: int, referrer_id: int) -> bool:
     """Фиксирует приглашение. True, если засчитано впервые.
 
     Не засчитывает самоприглашение и повторный приход одного и того же
@@ -455,11 +437,7 @@ async def register_referral(
 
 async def count_referrals(session: AsyncSession, referrer_id: int) -> int:
     """Сколько человек пригласил пользователь."""
-    stmt = (
-        select(_func.count())
-        .select_from(Referral)
-        .where(Referral.referrer_id == referrer_id)
-    )
+    stmt = select(_func.count()).select_from(Referral).where(Referral.referrer_id == referrer_id)
     return int((await session.execute(stmt)).scalar_one())
 
 
@@ -469,9 +447,7 @@ async def get_referrer(session: AsyncSession, invited_id: int) -> int | None:
     return ref.referrer_id if ref else None
 
 
-async def top_referrers(
-    session: AsyncSession, limit: int = 10
-) -> list[tuple[int, int]]:
+async def top_referrers(session: AsyncSession, limit: int = 10) -> list[tuple[int, int]]:
     """Топ пригласивших: список (referrer_id, число_приглашённых)."""
     stmt = (
         select(Referral.referrer_id, _func.count().label("cnt"))
@@ -482,10 +458,10 @@ async def top_referrers(
     rows = (await session.execute(stmt)).all()
     return [(int(rid), int(cnt)) for rid, cnt in rows]
 
+
 # ──────────────────────────────────────────────────────────────────────────
 # Конкурсы и розыгрыши (раздел 4.6 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
-from database.models import Giveaway, GiveawayParticipant
 
 
 async def create_giveaway(
@@ -529,8 +505,11 @@ async def get_giveaway(session: AsyncSession, giveaway_id: int) -> Giveaway | No
 
 
 async def add_participant(
-    session: AsyncSession, giveaway_id: int, user_id: int,
-    full_name: str, username: str,
+    session: AsyncSession,
+    giveaway_id: int,
+    user_id: int,
+    full_name: str,
+    username: str,
 ) -> bool:
     """Добавляет участника. False, если уже участвует."""
     stmt = select(GiveawayParticipant).where(
@@ -539,10 +518,14 @@ async def add_participant(
     )
     if (await session.execute(stmt)).scalar_one_or_none() is not None:
         return False
-    session.add(GiveawayParticipant(
-        giveaway_id=giveaway_id, user_id=user_id,
-        full_name=full_name or "", username=username or "",
-    ))
+    session.add(
+        GiveawayParticipant(
+            giveaway_id=giveaway_id,
+            user_id=user_id,
+            full_name=full_name or "",
+            username=username or "",
+        )
+    )
     await session.commit()
     return True
 
@@ -556,18 +539,12 @@ async def count_participants(session: AsyncSession, giveaway_id: int) -> int:
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def list_participants(
-    session: AsyncSession, giveaway_id: int
-) -> list[GiveawayParticipant]:
-    stmt = select(GiveawayParticipant).where(
-        GiveawayParticipant.giveaway_id == giveaway_id
-    )
+async def list_participants(session: AsyncSession, giveaway_id: int) -> list[GiveawayParticipant]:
+    stmt = select(GiveawayParticipant).where(GiveawayParticipant.giveaway_id == giveaway_id)
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def set_giveaway_status(
-    session: AsyncSession, giveaway_id: int, status: str
-) -> None:
+async def set_giveaway_status(session: AsyncSession, giveaway_id: int, status: str) -> None:
     g = await session.get(Giveaway, giveaway_id)
     if g is not None:
         g.status = status
@@ -579,10 +556,10 @@ async def list_active_giveaways(session: AsyncSession) -> list[Giveaway]:
     stmt = select(Giveaway).where(Giveaway.status == "active")
     return list((await session.execute(stmt)).scalars().all())
 
+
 # ──────────────────────────────────────────────────────────────────────────
 # Реестр управляемых чатов/каналов (список + индивидуальные настройки)
 # ──────────────────────────────────────────────────────────────────────────
-from database.models import ManagedChat
 
 
 async def upsert_managed_chat(
@@ -629,19 +606,33 @@ async def deactivate_managed_chat(session: AsyncSession, chat_id: int) -> None:
         await session.commit()
 
 
-async def get_managed_chat(
-    session: AsyncSession, chat_id: int
-) -> ManagedChat | None:
+async def get_managed_chat(session: AsyncSession, chat_id: int) -> ManagedChat | None:
     """Возвращает запись чата по id."""
     return await session.get(ManagedChat, chat_id)
 
 
-async def list_managed_chats(
-    session: AsyncSession, only_active: bool = True
-) -> list[ManagedChat]:
+async def list_managed_chats(session: AsyncSession, only_active: bool = True) -> list[ManagedChat]:
     """Список всех чатов/каналов, где есть бот (для глобальных админов бота)."""
     stmt = select(ManagedChat)
     if only_active:
         stmt = stmt.where(ManagedChat.is_active.is_(True))
     stmt = stmt.order_by(ManagedChat.title.asc())
     return list((await session.execute(stmt)).scalars().all())
+
+async def update_post_content(
+    session: AsyncSession, post_id: int,
+    text: str | None = None, media: str | None = None,
+    buttons: str | None = None,
+) -> bool:
+    """Обновляет содержимое pending-поста. True при успехе."""
+    post = await session.get(ScheduledPost, post_id)
+    if post is None or post.status != "pending":
+        return False
+    if text is not None:
+        post.text = text
+    if media is not None:
+        post.media = media
+    if buttons is not None:
+        post.buttons = buttons
+    await session.commit()
+    return True

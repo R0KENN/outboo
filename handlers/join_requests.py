@@ -4,6 +4,7 @@
 Если в настройках чата autoapprove_enabled=True — бот одобряет заявку
 автоматически. Бот должен быть админом с правом «приглашать пользователей».
 """
+
 import logging
 
 from aiogram import Bot, Router
@@ -34,7 +35,8 @@ async def on_join_request(event: ChatJoinRequest, bot: Bot) -> None:
         )
         logger.info(
             "Заявка одобрена: %s в %s.",
-            event.from_user.id, chat_id,
+            event.from_user.id,
+            chat_id,
         )
         # По желанию — личное приветствие новому участнику в ЛС
         if cfg.welcome_enabled and cfg.welcome_text:

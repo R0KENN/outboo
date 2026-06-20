@@ -1,14 +1,18 @@
 """Управление новыми участниками: капча, приветствие, карантin, очистка (раздел 4.2)."""
+
 import asyncio
 import logging
 
 from aiogram import F, Router
 from aiogram.types import (
-    CallbackQuery, ChatMemberUpdated, ChatPermissions, Message,
+    CallbackQuery,
+    ChatMemberUpdated,
+    ChatPermissions,
+    Message,
 )
 
-from database.crud import get_or_create_chat_settings, record_join
 from database import crud
+from database.crud import get_or_create_chat_settings, record_join
 from database.engine import session_factory
 from services import captcha as cap
 
@@ -19,7 +23,8 @@ router = Router(name="newcomers")
 async def _restrict(bot, chat_id: int, user_id: int) -> None:
     """Полностью запрещает писать (на время прохождения капчи)."""
     await bot.restrict_chat_member(
-        chat_id, user_id,
+        chat_id,
+        user_id,
         permissions=ChatPermissions(can_send_messages=False),
     )
 
@@ -27,13 +32,19 @@ async def _restrict(bot, chat_id: int, user_id: int) -> None:
 async def _unrestrict(bot, chat_id: int, user_id: int) -> None:
     """Возвращает полный набор прав после успешной капчи."""
     await bot.restrict_chat_member(
-        chat_id, user_id,
+        chat_id,
+        user_id,
         permissions=ChatPermissions(
-            can_send_messages=True, can_send_audios=True,
-            can_send_documents=True, can_send_photos=True,
-            can_send_videos=True, can_send_video_notes=True,
-            can_send_voice_notes=True, can_send_polls=True,
-            can_send_other_messages=True, can_add_web_page_previews=True,
+            can_send_messages=True,
+            can_send_audios=True,
+            can_send_documents=True,
+            can_send_photos=True,
+            can_send_videos=True,
+            can_send_video_notes=True,
+            can_send_voice_notes=True,
+            can_send_polls=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
         ),
     )
 
@@ -47,12 +58,14 @@ async def _send_welcome(bot, chat_id: int, user, cfg) -> None:
         text += f"\n\n{cfg.rules_text}"
     msg = await bot.send_message(chat_id, text)
     if cfg.welcome_delete_after > 0:
+
         async def _delayed_delete():
             await asyncio.sleep(cfg.welcome_delete_after)
             try:
                 await bot.delete_message(chat_id, msg.message_id)
             except Exception:
                 pass
+
         asyncio.create_task(_delayed_delete())
 
 
@@ -113,23 +126,26 @@ async def on_member_update(event: ChatMemberUpdated) -> None:
 
     text, kb, correct = cap.build_captcha(cfg.captcha_type, chat_id, user.id)
     prompt = await bot.send_message(
-        chat_id, f"{user.full_name}, {text}", reply_markup=kb,
+        chat_id,
+        f"{user.full_name}, {text}",
+        reply_markup=kb,
     )
 
     cap.pending[(chat_id, user.id)] = cap.PendingCaptcha(
-        user_id=user.id, chat_id=chat_id, correct=correct,
-        join_message_id=0, prompt_message_id=prompt.message_id,
+        user_id=user.id,
+        chat_id=chat_id,
+        correct=correct,
+        join_message_id=0,
+        prompt_message_id=prompt.message_id,
     )
-    asyncio.create_task(
-        _captcha_timeout(bot, chat_id, user.id, cfg.captcha_timeout)
-    )
+    asyncio.create_task(_captcha_timeout(bot, chat_id, user.id, cfg.captcha_timeout))
 
 
 @router.callback_query(F.data.startswith("captcha:"))
 async def on_captcha_answer(callback: CallbackQuery) -> None:
     """Обрабатывает нажатие кнопки капчи."""
     parts = callback.data.split(":")
-    kind = parts[1]              # ok | ans
+    _ = parts[1]              # тип (ok | ans) — пока не используется
     chat_id = int(parts[2])
     user_id = int(parts[3])
     answer = parts[4] if len(parts) > 4 else "ok"

@@ -5,14 +5,15 @@
 Команда /ref показывает ссылку и число приглашённых, /reftop — рейтинг.
 Сама регистрация перехода происходит в handlers/start.py (разбор start=ref_).
 """
+
 import logging
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 
 logger = logging.getLogger(__name__)
 router = Router(name="referral")

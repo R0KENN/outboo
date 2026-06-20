@@ -1,15 +1,16 @@
 """Middleware определения прав пользователя (раздел 6, безопасность)."""
-from typing import Any, Awaitable, Callable
+
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message
 
+from config import settings
 from database.crud import get_moderator
 from database.engine import session_factory
-from config import settings
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ def _cached_admin(chat_id: int, user_id: int) -> bool | None:
 
 def _store_admin(chat_id: int, user_id: int, value: bool) -> None:
     _admin_cache[(chat_id, user_id)] = (value, time.monotonic() + _ADMIN_TTL)
+
 
 class AdminCheckMiddleware(BaseMiddleware):
     """Добавляет в data ключи is_admin и is_moderator для текущего пользователя."""
@@ -51,9 +53,7 @@ class AdminCheckMiddleware(BaseMiddleware):
                 is_admin = cached
             else:
                 try:
-                    member = await event.bot.get_chat_member(
-                        event.chat.id, event.from_user.id
-                    )
+                    member = await event.bot.get_chat_member(event.chat.id, event.from_user.id)
                     is_admin = member.status in (
                         ChatMemberStatus.ADMINISTRATOR,
                         ChatMemberStatus.CREATOR,
@@ -61,21 +61,20 @@ class AdminCheckMiddleware(BaseMiddleware):
                 except Exception as e:
                     logger.warning(
                         "Не удалось получить статус %s в чате %s: %s",
-                        event.from_user.id, event.chat.id, e,
+                        event.from_user.id,
+                        event.chat.id,
+                        e,
                     )
                     is_admin = False
                 _store_admin(event.chat.id, event.from_user.id, is_admin)
 
             if not is_admin:
                 async with session_factory() as session:
-                    mod = await get_moderator(
-                        session, event.chat.id, event.from_user.id
-                    )
+                    mod = await get_moderator(session, event.chat.id, event.from_user.id)
                     is_moderator = mod is not None
                     if mod is not None:
                         data["mod_permissions"] = set(
-                            p.strip() for p in (mod.permissions or "").split(",")
-                            if p.strip()
+                            p.strip() for p in (mod.permissions or "").split(",") if p.strip()
                         )
 
         data["is_admin"] = is_admin

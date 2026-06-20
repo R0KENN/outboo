@@ -1,12 +1,13 @@
 """Модуль статистики (раздел 4.5 ТЗ). Команда /stats, доступна админам/модерам."""
+
 import logging
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 from filters.admin import IsAdminOrModerator
 
 logger = logging.getLogger(__name__)
@@ -51,8 +52,7 @@ async def cmd_stats(message: Message) -> None:
     period_key = parts[1].lower() if len(parts) > 1 else "week"
     if period_key not in _PERIODS:
         await message.answer(
-            "Период не распознан. Используйте: "
-            "/stats day, /stats week или /stats month."
+            "Период не распознан. Используйте: /stats day, /stats week или /stats month."
         )
         return
 

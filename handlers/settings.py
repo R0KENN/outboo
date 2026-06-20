@@ -3,6 +3,7 @@
 Команда /settings открывает меню. Нажатия обрабатываются по callback_data
 вида set:<действие>:<поле>:<chat_id>. Доступ — только администраторам.
 """
+
 import logging
 
 from aiogram import F, Router
@@ -10,9 +11,9 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from database.crud import get_or_create_chat_settings, get_managed_chat
+from database.crud import get_managed_chat, get_or_create_chat_settings
 from database.engine import session_factory
-from keyboards.settings_kb import main_settings_kb, params_kb, autoreact_kb
+from keyboards.settings_kb import autoreact_kb, main_settings_kb, params_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="settings")
@@ -37,7 +38,8 @@ async def _is_admin(message_or_cb, chat_id: int, user_id: int) -> bool:
     try:
         member = await message_or_cb.bot.get_chat_member(chat_id, user_id)
         return member.status in (
-            ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR,
         )
     except Exception:
         return False
@@ -156,6 +158,7 @@ async def on_settings_callback(callback: CallbackQuery) -> None:
             )
             await callback.answer()
 
+
 @router.message(Command("setwelcome"))
 async def cmd_set_welcome(message: Message) -> None:
     """Задаёт текст приветствия. Используйте {name} для подстановки имени."""
@@ -165,8 +168,7 @@ async def cmd_set_welcome(message: Message) -> None:
     text = message.text.partition(" ")[2].strip()
     if not text:
         await message.answer(
-            "Укажите текст после команды.\n"
-            "Пример: /setwelcome Привет, {name}! Читай правила."
+            "Укажите текст после команды.\nПример: /setwelcome Привет, {name}! Читай правила."
         )
         return
     async with session_factory() as session:

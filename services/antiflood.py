@@ -2,6 +2,7 @@
 
 Счётчики хранятся в памяти процесса (по договорённости — без Redis).
 """
+
 import time
 from collections import defaultdict, deque
 
@@ -14,7 +15,11 @@ class FloodTracker:
         self._events: dict[tuple[int, int], deque] = defaultdict(deque)
 
     def register(
-        self, chat_id: int, user_id: int, limit: int, window: int,
+        self,
+        chat_id: int,
+        user_id: int,
+        limit: int,
+        window: int,
     ) -> bool:
         """Регистрирует сообщение. True, если лимит превышен (это флуд)."""
         now = time.monotonic()

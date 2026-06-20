@@ -3,6 +3,7 @@
 Вся навигация — на inline-кнопках. /start открывает меню, убирает старую
 reply-клавиатуру и регистрирует подписчика/реферала.
 """
+
 import logging
 
 from aiogram import F, Router
@@ -10,16 +11,19 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
     ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import settings
 from database.crud import (
-    list_managed_chats,
     get_managed_chat,
     get_or_create_chat_settings,
+    list_managed_chats,
 )
 from database.engine import session_factory
 from keyboards.settings_kb import main_settings_kb
@@ -40,7 +44,8 @@ async def _is_chat_admin(bot, chat_id: int, user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         return member.status in (
-            ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR,
         )
     except Exception:
         return False
@@ -85,10 +90,12 @@ def chats_list_kb(chats) -> InlineKeyboardMarkup:
     for ch in chats:
         title = ch.title or str(ch.chat_id)
         admin_mark = "" if ch.is_admin else " ⚠️"
-        b.row(InlineKeyboardButton(
-            text=f"{_chat_icon(ch.chat_type)} {title}{admin_mark}",
-            callback_data=f"menu:open:{ch.chat_id}",
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text=f"{_chat_icon(ch.chat_type)} {title}{admin_mark}",
+                callback_data=f"menu:open:{ch.chat_id}",
+            )
+        )
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:home"))
     return b.as_markup()
 
@@ -103,6 +110,7 @@ async def cmd_start(message: Message) -> None:
     # Регистрация подписчика/реферала (перенесено из старого start.py)
     if message.from_user:
         from database import crud
+
         user_id = message.from_user.id
         parts = (message.text or "").split(maxsplit=1)
         payload = parts[1].strip() if len(parts) > 1 else ""
@@ -226,8 +234,12 @@ async def on_open_chat(callback: CallbackQuery) -> None:
 async def on_newpost_start(callback: CallbackQuery, state: FSMContext) -> None:
     """Создание поста: выбор каналов кнопками."""
     from handlers.posting import start_channel_choice
+
     await start_channel_choice(
-        callback.message, state, user_id=callback.from_user.id, edit=True,
+        callback.message,
+        state,
+        user_id=callback.from_user.id,
+        edit=True,
     )
     await callback.answer()
 
@@ -236,6 +248,7 @@ async def on_newpost_start(callback: CallbackQuery, state: FSMContext) -> None:
 async def on_queue(callback: CallbackQuery) -> None:
     """Очередь запланированных постов."""
     from handlers.posting import cmd_queue
+
     await cmd_queue(_as_user_message(callback))
     await callback.answer()
 
@@ -244,6 +257,7 @@ async def on_queue(callback: CallbackQuery) -> None:
 async def on_giveaway(callback: CallbackQuery, state: FSMContext) -> None:
     """Создание конкурса (FSM-диалог)."""
     from handlers.giveaway import cmd_newgiveaway
+
     await cmd_newgiveaway(_as_user_message(callback), state)
     await callback.answer()
 
@@ -255,6 +269,7 @@ async def on_broadcast(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.broadcast import cmd_broadcast
+
     await cmd_broadcast(_as_user_message(callback), state)
     await callback.answer()
 
@@ -266,6 +281,7 @@ async def on_subs(callback: CallbackQuery) -> None:
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.broadcast import cmd_subs
+
     await cmd_subs(_as_user_message(callback))
     await callback.answer()
 
@@ -294,6 +310,7 @@ async def on_export_run(callback: CallbackQuery) -> None:
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.sheets import cmd_export
+
     await cmd_export(_as_user_message(callback))
     await callback.answer()
 
@@ -304,6 +321,7 @@ async def on_export_test(callback: CallbackQuery) -> None:
         await callback.answer("Только для владельцев бота.", show_alert=True)
         return
     from handlers.sheets import cmd_sheettest
+
     await cmd_sheettest(_as_user_message(callback))
     await callback.answer()
 

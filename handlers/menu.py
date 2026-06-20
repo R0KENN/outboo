@@ -3,19 +3,19 @@
 Кнопки присылают текст — ловим его и вызываем уже существующие хендлеры,
 чтобы не дублировать логику.
 """
+
 import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from config import settings
+from handlers.broadcast import cmd_broadcast, cmd_subs
+from handlers.giveaway import cmd_newgiveaway
 
 # Импортируем готовые хендлеры команд, чтобы переиспользовать их логику
 from handlers.posting import cmd_newpost, cmd_queue
-from handlers.giveaway import cmd_newgiveaway
 from handlers.referral import cmd_ref
-from handlers.broadcast import cmd_broadcast, cmd_subs
 from handlers.sheets import cmd_export
 from handlers.start import cmd_help
 

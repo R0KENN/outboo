@@ -1,4 +1,5 @@
 """Администрирование: роли модераторов, словари, белый список, лог (разделы 4.1, 4.4)."""
+
 import logging
 
 from aiogram import Router
@@ -6,8 +7,8 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 from utils.datetime_parse import to_local_str
 from utils.parse import get_target_id
 
@@ -27,11 +28,10 @@ async def _is_full_admin(message: Message) -> bool:
     if message.chat.type not in ("group", "supergroup"):
         return False
     try:
-        member = await message.bot.get_chat_member(
-            message.chat.id, message.from_user.id
-        )
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
         return member.status in (
-            ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR,
         )
     except Exception:
         return False
@@ -52,10 +52,7 @@ async def cmd_addmod(message: Message) -> None:
         return
     target_id, name = get_target_id(message)
     if target_id is None:
-        await message.answer(
-            "Ответьте на сообщение пользователя.\n"
-            "Пример: /addmod mute warn"
-        )
+        await message.answer("Ответьте на сообщение пользователя.\nПример: /addmod mute warn")
         return
 
     parts = (message.text or "").split()[1:]
@@ -81,10 +78,7 @@ async def cmd_delmod(message: Message) -> None:
         return
     async with session_factory() as session:
         ok = await crud.remove_moderator(session, message.chat.id, target_id)
-    await message.answer(
-        f"{name} больше не модератор." if ok
-        else f"{name} не был модератором."
-    )
+    await message.answer(f"{name} больше не модератор." if ok else f"{name} не был модератором.")
 
 
 @router.message(Command("mods"))
@@ -145,9 +139,7 @@ async def cmd_words(message: Message) -> None:
     if not words:
         await message.answer("Словарь стоп-слов пуст.")
         return
-    await message.answer(
-        "🚫 <b>Стоп-слова:</b>\n" + ", ".join(f"<code>{w}</code>" for w in words)
-    )
+    await message.answer("🚫 <b>Стоп-слова:</b>\n" + ", ".join(f"<code>{w}</code>" for w in words))
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -192,8 +184,7 @@ async def cmd_domains(message: Message) -> None:
         await message.answer("Белый список доменов пуст (разрешённых ссылок нет).")
         return
     await message.answer(
-        "✅ <b>Разрешённые домены:</b>\n"
-        + ", ".join(f"<code>{d}</code>" for d in domains)
+        "✅ <b>Разрешённые домены:</b>\n" + ", ".join(f"<code>{d}</code>" for d in domains)
     )
 
 

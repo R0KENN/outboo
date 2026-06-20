@@ -3,8 +3,9 @@
 Используется в постинге, конкурсах, экспорте — везде, где нужно выбрать
 целевой чат кнопками, а не вводить @username вручную.
 """
+
 from aiogram.enums import ChatMemberStatus
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import settings
@@ -55,7 +56,8 @@ async def build_chat_picker(
             try:
                 m = await bot.get_chat_member(ch.chat_id, user_id)
                 if m.status not in (
-                    ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+                    ChatMemberStatus.ADMINISTRATOR,
+                    ChatMemberStatus.CREATOR,
                 ):
                     continue
             except Exception:
@@ -66,21 +68,27 @@ async def build_chat_picker(
             mark = "✅ " if ch.chat_id in selected else "▫️ "
         else:
             mark = ""
-        b.row(InlineKeyboardButton(
-            text=f"{mark}{chat_icon(ch.chat_type)} {title}",
-            callback_data=f"{callback_prefix}:{ch.chat_id}",
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text=f"{mark}{chat_icon(ch.chat_type)} {title}",
+                callback_data=f"{callback_prefix}:{ch.chat_id}",
+            )
+        )
         shown += 1
 
     if multi:
-        b.row(InlineKeyboardButton(
-            text=f"➡️ Готово ({len(selected)})",
-            callback_data=f"{callback_prefix}_done",
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text=f"➡️ Готово ({len(selected)})",
+                callback_data=f"{callback_prefix}_done",
+            )
+        )
     if show_manual:
-        b.row(InlineKeyboardButton(
-            text="✍️ Ввести вручную",
-            callback_data=f"{callback_prefix}_manual",
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text="✍️ Ввести вручную",
+                callback_data=f"{callback_prefix}_manual",
+            )
+        )
     b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
     return b.as_markup(), shown

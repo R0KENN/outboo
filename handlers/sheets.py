@@ -3,6 +3,7 @@
 Только для владельцев бота, в личке. Выгружает подписчиков, участников
 конкурсов и журнал модерации на отдельные листы таблицы из .env.
 """
+
 import logging
 
 from aiogram import Router
@@ -12,7 +13,7 @@ from sqlalchemy import select
 
 from config import settings
 from database.engine import session_factory
-from database.models import Subscriber, GiveawayParticipant, ModerationLog
+from database.models import GiveawayParticipant, ModerationLog, Subscriber
 from services import sheets
 from utils.datetime_parse import to_local_str
 
@@ -59,9 +60,13 @@ async def cmd_export(message: Message) -> None:
         async with session_factory() as session:
             subs = (await session.execute(select(Subscriber))).scalars().all()
         sub_rows = [
-            [s.user_id, s.username, s.full_name,
-             "да" if s.is_active else "нет",
-             to_local_str(s.joined_at) if s.joined_at else ""]
+            [
+                s.user_id,
+                s.username,
+                s.full_name,
+                "да" if s.is_active else "нет",
+                to_local_str(s.joined_at) if s.joined_at else "",
+            ]
             for s in subs
         ]
         n_subs = await sheets.write_worksheet(
@@ -74,8 +79,13 @@ async def cmd_export(message: Message) -> None:
         async with session_factory() as session:
             parts = (await session.execute(select(GiveawayParticipant))).scalars().all()
         part_rows = [
-            [p.giveaway_id, p.user_id, p.username, p.full_name,
-             to_local_str(p.joined_at) if p.joined_at else ""]
+            [
+                p.giveaway_id,
+                p.user_id,
+                p.username,
+                p.full_name,
+                to_local_str(p.joined_at) if p.joined_at else "",
+            ]
             for p in parts
         ]
         n_parts = await sheets.write_worksheet(
@@ -86,13 +96,19 @@ async def cmd_export(message: Message) -> None:
 
         # 3. Журнал модерации
         async with session_factory() as session:
-            logs = (await session.execute(
-                select(ModerationLog).order_by(ModerationLog.created_at.desc())
-            )).scalars().all()
+            logs = (
+                (
+                    await session.execute(
+                        select(ModerationLog).order_by(ModerationLog.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
         log_rows = [
-            [l.chat_id, l.action, l.actor_id, l.target_id, l.reason,
-             to_local_str(l.created_at) if l.created_at else ""]
-            for l in logs
+            [log.chat_id, log.action, log.actor_id, log.target_id, log.reason,
+             to_local_str(log.created_at) if log.created_at else ""]
+            for log in logs
         ]
         n_logs = await sheets.write_worksheet(
             "Журнал модерации",

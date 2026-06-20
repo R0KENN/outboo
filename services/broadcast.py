@@ -6,18 +6,19 @@
 и повторная попытка. Рассылка копирует исходное сообщение администратора,
 поэтому поддерживает любой контент: текст, фото, видео, кнопки и т.д.
 """
+
 import asyncio
 import logging
 
 from aiogram import Bot
 from aiogram.exceptions import (
+    TelegramBadRequest,
     TelegramForbiddenError,
     TelegramRetryAfter,
-    TelegramBadRequest,
 )
 
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 
 logger = logging.getLogger(__name__)
 

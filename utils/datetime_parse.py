@@ -1,5 +1,6 @@
 """Разбор даты и времени публикации, введённых администратором (раздел 4.3)."""
-from datetime import datetime, timezone, timedelta
+
+from datetime import UTC, datetime, timedelta, timezone
 
 # Часовой пояс по умолчанию для ввода админа (МСК). При желании вынести в .env.
 DEFAULT_TZ = timezone(timedelta(hours=3))
@@ -8,7 +9,7 @@ _FORMATS = (
     "%d.%m.%Y %H:%M",
     "%d.%m.%y %H:%M",
     "%Y-%m-%d %H:%M",
-    "%d.%m %H:%M",      # без года — подставим текущий
+    "%d.%m %H:%M",  # без года — подставим текущий
 )
 
 
@@ -37,9 +38,9 @@ def parse_publish_time(text: str) -> datetime | None:
 
     # Привязываем к часовому поясу админа и переводим в UTC для хранения
     aware = parsed.replace(tzinfo=DEFAULT_TZ)
-    utc = aware.astimezone(timezone.utc)
+    utc = aware.astimezone(UTC)
 
-    if utc <= datetime.now(timezone.utc):
+    if utc <= datetime.now(UTC):
         return None
     return utc
 
@@ -47,5 +48,5 @@ def parse_publish_time(text: str) -> datetime | None:
 def to_local_str(dt: datetime) -> str:
     """Форматирует UTC-время в строку в локальном поясе для показа админу."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(DEFAULT_TZ).strftime("%d.%m.%Y %H:%M")

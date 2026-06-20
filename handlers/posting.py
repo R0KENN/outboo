@@ -4,9 +4,11 @@
 отмена, перенос, публикация «сейчас». Создание ведётся в личке с ботом.
 Целевые каналы выбираются кнопками из реестра managed_chats.
 """
+
 import json
 import logging
 import uuid
+from datetime import UTC
 
 from aiogram import F, Router
 from aiogram.enums import ChatMemberStatus
@@ -14,14 +16,17 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import settings as app_settings
-from database.engine import session_factory
 from database import crud
-from database.crud import list_managed_chats, get_managed_chat
+from database.crud import get_managed_chat, list_managed_chats
+from database.engine import session_factory
 from services import scheduler as sched
 from utils.datetime_parse import parse_publish_time, to_local_str
 
@@ -36,17 +41,24 @@ class NewPost(StatesGroup):
     buttons = State()
     when = State()
     delete_after = State()
+    preview = State()   # ← добавить
 
 
 def _cancel_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")
-    ]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")]]
+    )
+
 
 class RescheduleFSM(StatesGroup):
     """Ожидание новой даты при переносе из карточки очереди."""
-    waiting_time = State()        # перенос одного поста
+
+    waiting_time = State()  # перенос одного поста
     waiting_time_batch = State()  # перенос всей группы
+
+class EditPostFSM(StatesGroup):
+    waiting_content = State()
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Выбор каналов (мультивыбор из managed_chats)
@@ -65,31 +77,43 @@ async def _channel_choice_kb(bot, user_id: int, is_global_admin: bool, selected:
             try:
                 m = await bot.get_chat_member(ch.chat_id, user_id)
                 if m.status not in (
-                    ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR,
+                    ChatMemberStatus.ADMINISTRATOR,
+                    ChatMemberStatus.CREATOR,
                 ):
                     continue
             except Exception:
                 continue
         title = ch.title or str(ch.chat_id)
         mark = "✅ " if ch.chat_id in selected else "▫️ "
-        b.row(InlineKeyboardButton(
-            text=f"{mark}📢 {title}",
-            callback_data=f"post:toggle:{ch.chat_id}",
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text=f"{mark}📢 {title}",
+                callback_data=f"post:toggle:{ch.chat_id}",
+            )
+        )
         shown += 1
 
-    b.row(InlineKeyboardButton(
-        text=f"➡️ Готово ({len(selected)})", callback_data="post:done",
-    ))
-    b.row(InlineKeyboardButton(
-        text="✍️ Ввести канал вручную", callback_data="post:manual",
-    ))
+    b.row(
+        InlineKeyboardButton(
+            text=f"➡️ Готово ({len(selected)})",
+            callback_data="post:done",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="✍️ Ввести канал вручную",
+            callback_data="post:manual",
+        )
+    )
     b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
     return b.as_markup(), shown
 
 
 async def start_channel_choice(
-    message: Message, state: FSMContext, user_id: int, edit: bool = False,
+    message: Message,
+    state: FSMContext,
+    user_id: int,
+    edit: bool = False,
 ) -> None:
     """Стартер диалога: чистит состояние и показывает мультивыбор каналов."""
     is_global_admin = user_id in app_settings.admin_ids
@@ -108,10 +132,7 @@ async def start_channel_choice(
             "Либо введите канал вручную."
         )
     else:
-        text = (
-            "📢 <b>Куда публикуем?</b>\n"
-            "Отметьте один или несколько каналов и нажмите «Готово»:"
-        )
+        text = "📢 <b>Куда публикуем?</b>\nОтметьте один или несколько каналов и нажмите «Готово»:"
 
     if edit:
         try:
@@ -129,9 +150,7 @@ async def start_channel_choice(
 async def cmd_newpost(message: Message, state: FSMContext) -> None:
     """Запускает диалог создания поста (в личке с ботом)."""
     if message.chat.type != "private":
-        await message.answer(
-            "Создавать посты удобнее в личке со мной: напишите /newpost мне в ЛС."
-        )
+        await message.answer("Создавать посты удобнее в личке со мной: напишите /newpost мне в ЛС.")
         return
     await start_channel_choice(message, state, user_id=message.from_user.id)
 
@@ -157,8 +176,10 @@ async def cb_toggle_channel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(channel_ids=list(selected))
 
     kb, _ = await _channel_choice_kb(
-        callback.bot, callback.from_user.id,
-        data.get("is_global_admin", False), selected,
+        callback.bot,
+        callback.from_user.id,
+        data.get("is_global_admin", False),
+        selected,
     )
     try:
         await callback.message.edit_reply_markup(reply_markup=kb)
@@ -240,15 +261,12 @@ async def step_channel(message: Message, state: FSMContext) -> None:
         member = await message.bot.get_chat_member(chat.id, message.bot.id)
         if member.status not in ("administrator", "creator"):
             await message.answer(
-                "Я не админ этого канала. Добавьте меня администратором и "
-                "пришлите канал ещё раз."
+                "Я не админ этого канала. Добавьте меня администратором и пришлите канал ещё раз."
             )
             return
     except Exception as e:
         logger.warning("Проверка канала не удалась: %s", e)
-        await message.answer(
-            "Не получилось найти канал. Проверьте @username/id и что бот в нём."
-        )
+        await message.answer("Не получилось найти канал. Проверьте @username/id и что бот в нём.")
         return
 
     await state.update_data(
@@ -289,6 +307,7 @@ _album_buffer: dict[str, list[dict]] = {}
 async def step_content_album(message: Message, state: FSMContext) -> None:
     """Собирает элементы альбома (приходят отдельными сообщениями)."""
     import asyncio
+
     mgid = message.media_group_id
     items = _extract_media(message)
     if items:
@@ -369,10 +388,12 @@ async def step_buttons(message: Message, state: FSMContext) -> None:
     await state.update_data(buttons=buttons)
     await state.set_state(NewPost.when)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data="post:now")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
-    ])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data="post:now")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+        ]
+    )
     await message.answer(
         "Когда опубликовать?\n"
         "Пришлите дату и время <code>ДД.ММ.ГГГГ ЧЧ:ММ</code> (МСК)\n"
@@ -388,15 +409,18 @@ async def step_buttons(message: Message, state: FSMContext) -> None:
 @router.callback_query(NewPost.when, F.data == "post:now")
 async def cb_publish_now(callback: CallbackQuery, state: FSMContext) -> None:
     """Публикует пост немедленно."""
-    from datetime import datetime, timezone
-    publish_at = datetime.now(timezone.utc)
+    from datetime import datetime
+
+    publish_at = datetime.now(UTC)
     await state.update_data(publish_at=publish_at.isoformat())
     await state.set_state(NewPost.delete_after)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Не удалять", callback_data="post:nodel")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
-    ])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Не удалять", callback_data="post:nodel")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+        ]
+    )
     await callback.message.edit_text(
         "Публикуем сейчас. Удалить пост автоматически через время?\n"
         "Пришлите число минут или нажмите «Не удалять».",
@@ -417,20 +441,59 @@ async def step_when(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(publish_at=publish_at.isoformat())
     await state.set_state(NewPost.delete_after)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Не удалять", callback_data="post:nodel")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
-    ])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Не удалять", callback_data="post:nodel")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+        ]
+    )
     await message.answer(
-        "Удалить пост автоматически через время?\n"
-        "Пришлите число минут или нажмите «Не удалять».",
+        "Удалить пост автоматически через время?\nПришлите число минут или нажмите «Не удалять».",
         reply_markup=kb,
     )
 
+async def _send_preview(bot, chat_id: int, data: dict) -> None:
+    """Отправляет пользователю предпросмотр поста ровно так, как он уйдёт в канал."""
+    from services.scheduler import _parse_media, _build_keyboard
+    text = data.get("text", "")
+    media = _parse_media(data.get("media", ""))
+    keyboard = _build_keyboard(data.get("buttons", ""))
+
+    if not media:
+        await bot.send_message(chat_id, text or "(пустой пост)",
+                               reply_markup=keyboard)
+    elif len(media) == 1:
+        item = media[0]
+        mtype, file_id = item.get("type"), item.get("file_id")
+        common = dict(caption=text or None, reply_markup=keyboard)
+        if mtype == "photo":
+            await bot.send_photo(chat_id, file_id, **common)
+        elif mtype == "video":
+            await bot.send_video(chat_id, file_id, **common)
+        elif mtype == "document":
+            await bot.send_document(chat_id, file_id, **common)
+        elif mtype == "audio":
+            await bot.send_audio(chat_id, file_id, **common)
+        else:
+            await bot.send_message(chat_id, text or "(пост)", reply_markup=keyboard)
+    else:
+        from services.scheduler import _INPUT_MEDIA
+        group = []
+        for i, item in enumerate(media):
+            cls = _INPUT_MEDIA.get(item.get("type"))
+            if cls is None:
+                continue
+            kwargs = {"media": item.get("file_id")}
+            if i == 0 and text:
+                kwargs["caption"] = text
+            group.append(cls(**kwargs))
+        await bot.send_media_group(chat_id, media=group)
+        if keyboard:
+            await bot.send_message(chat_id, "⬆️ кнопки поста", reply_markup=keyboard)
 
 async def _finalize_posts(message: Message, state: FSMContext, delete_after: int) -> None:
     """Создаёт записи постов во все выбранные каналы и ставит их в планировщик."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     data = await state.get_data()
     publish_at = datetime.fromisoformat(data["publish_at"])
@@ -465,11 +528,10 @@ async def _finalize_posts(message: Message, state: FSMContext, delete_after: int
 
     await state.clear()
 
-    del_note = (f"\nАвтоудаление через {delete_after // 60} мин."
-                if delete_after else "")
+    del_note = f"\nАвтоудаление через {delete_after // 60} мин." if delete_after else ""
     ids_str = ", ".join(f"#{i}" for i in created_ids)
     chans_str = ", ".join(channel_titles) if channel_titles else str(len(created_ids))
-    is_now = (publish_at - datetime.now(timezone.utc)).total_seconds() < 90
+    is_now = (publish_at - datetime.now(UTC)).total_seconds() < 90
     when_str = "сейчас" if is_now else f"{to_local_str(publish_at)} (МСК)"
 
     await message.answer(
@@ -482,17 +544,18 @@ async def _finalize_posts(message: Message, state: FSMContext, delete_after: int
 
 @router.callback_query(NewPost.delete_after, F.data == "post:nodel")
 async def cb_no_delete(callback: CallbackQuery, state: FSMContext) -> None:
-    """Без автоудаления — финализируем."""
-    await _finalize_posts(
+    """Без автоудаления — показываем предпросмотр."""
+    await state.update_data(delete_after=0)
+    await _show_preview_step(
         callback.message.model_copy(update={"from_user": callback.from_user}),
-        state, delete_after=0,
+        state,
     )
     await callback.answer()
 
 
 @router.message(NewPost.delete_after)
 async def step_delete_after(message: Message, state: FSMContext) -> None:
-    """Принимает число минут автоудаления (или «-») и финализирует пост."""
+    """Принимает число минут автоудаления (или «-») и показывает предпросмотр."""
     raw = (message.text or "").strip()
     delete_after = 0
     if raw != "-":
@@ -501,7 +564,62 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
         except ValueError:
             await message.answer("Пришлите число минут или «-».")
             return
-    await _finalize_posts(message, state, delete_after)
+    await state.update_data(delete_after=delete_after)
+    await _show_preview_step(message, state)
+
+
+async def _show_preview_step(message: Message, state: FSMContext) -> None:
+    """Показывает предпросмотр и кнопки подтверждения."""
+    data = await state.get_data()
+    await state.set_state(NewPost.preview)
+
+    await message.answer("👀 <b>Предпросмотр поста:</b>")
+    try:
+        await _send_preview(message.bot, message.chat.id, data)
+    except Exception as e:
+        await message.answer(f"Не удалось отрисовать превью: {e}")
+
+    titles = data.get("channel_titles", [])
+    from datetime import datetime, timezone
+    publish_at = datetime.fromisoformat(data["publish_at"])
+    is_now = (publish_at - datetime.now(timezone.utc)).total_seconds() < 90
+    when = "сейчас" if is_now else f"{to_local_str(publish_at)} (МСК)"
+    da = data.get("delete_after", 0)
+    da_note = f"\nАвтоудаление через {da // 60} мин." if da else ""
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Опубликовать", callback_data="post:confirm")],
+        [InlineKeyboardButton(text="✏️ Изменить текст", callback_data="post:edittext")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+    ])
+    await message.answer(
+        f"Каналы: <b>{', '.join(titles) if titles else '—'}</b>\n"
+        f"Время: <b>{when}</b>{da_note}\n\n"
+        "Всё верно?",
+        reply_markup=kb,
+    )
+
+
+@router.callback_query(NewPost.preview, F.data == "post:confirm")
+async def cb_confirm_post(callback: CallbackQuery, state: FSMContext) -> None:
+    """Подтверждение — создаём посты."""
+    data = await state.get_data()
+    await _finalize_posts(
+        callback.message.model_copy(update={"from_user": callback.from_user}),
+        state, delete_after=data.get("delete_after", 0),
+    )
+    await callback.answer()
+
+
+@router.callback_query(NewPost.preview, F.data == "post:edittext")
+async def cb_edit_text(callback: CallbackQuery, state: FSMContext) -> None:
+    """Возврат к вводу текста: оставляем медиа/кнопки, ждём новый текст."""
+    await state.set_state(NewPost.content)
+    await callback.message.answer(
+        "Пришлите новый текст (или новое содержимое) поста:",
+        reply_markup=_cancel_kb(),
+    )
+    await callback.answer()
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -510,10 +628,13 @@ async def step_delete_after(message: Message, state: FSMContext) -> None:
 # ──────────────────────────────────────────────────────────────────────────
 # Управление очередью (инлайн-вкладка)
 # ──────────────────────────────────────────────────────────────────────────
-def _queue_list_kb(groups) -> InlineKeyboardMarkup:
-    """Список запланированных постов кнопками."""
+def _queue_list_kb(groups, page: int = 0) -> InlineKeyboardMarkup:
+    """Список запланированных постов кнопками, с пагинацией."""
+    from utils.pagination import paginate, nav_row
+    page_items, pages, page = paginate(groups, page)
+
     b = InlineKeyboardBuilder()
-    for grp in groups:
+    for grp in page_items:
         first = grp[0]
         preview = (first.text or "").replace("\n", " ")[:25] or "(медиа)"
         when = to_local_str(first.publish_at)
@@ -524,6 +645,9 @@ def _queue_list_kb(groups) -> InlineKeyboardMarkup:
             label = f"📄 {when} · {preview}"
             cb = f"q:post:{first.id}"
         b.row(InlineKeyboardButton(text=label, callback_data=cb))
+
+    nav_row(b, "q:page", page, pages)
+
     b.row(
         InlineKeyboardButton(text="➕ Новый пост", callback_data="q:new"),
         InlineKeyboardButton(text="🔄 Обновить", callback_data="q:refresh"),
@@ -535,6 +659,7 @@ def _queue_list_kb(groups) -> InlineKeyboardMarkup:
 def _post_card_kb(post_id: int) -> InlineKeyboardMarkup:
     """Карточка одного поста."""
     b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="✏️ Изменить", callback_data=f"q:edit:{post_id}"))
     b.row(InlineKeyboardButton(text="🕐 Перенести", callback_data=f"q:resched:{post_id}"))
     b.row(InlineKeyboardButton(text="🗑 Отменить", callback_data=f"q:cancel:{post_id}"))
     b.row(InlineKeyboardButton(text="⬅️ К списку", callback_data="q:refresh"))
@@ -543,15 +668,19 @@ def _post_card_kb(post_id: int) -> InlineKeyboardMarkup:
 
 def _batch_card_kb(batch_id: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(
-        text="🕐 Перенести группу", callback_data=f"q:reschedbatch:{batch_id}"))
-    b.row(InlineKeyboardButton(
-        text="🗑 Отменить всю группу", callback_data=f"q:cancelbatch:{batch_id}"))
+    b.row(
+        InlineKeyboardButton(text="🕐 Перенести группу", callback_data=f"q:reschedbatch:{batch_id}")
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="🗑 Отменить всю группу", callback_data=f"q:cancelbatch:{batch_id}"
+        )
+    )
     b.row(InlineKeyboardButton(text="⬅️ К списку", callback_data="q:refresh"))
     return b.as_markup()
 
 
-async def _render_queue(target, edit: bool = False) -> None:
+async def _render_queue(target, edit: bool = False, page: int = 0) -> None:
     """Рисует список очереди (target — Message)."""
     async with session_factory() as session:
         groups = await crud.list_pending_grouped(session)
@@ -563,7 +692,7 @@ async def _render_queue(target, edit: bool = False) -> None:
         ])
     else:
         text = "📋 <b>Запланированные посты</b>\nНажмите на пост для управления:"
-        kb = _queue_list_kb(groups)
+        kb = _queue_list_kb(groups, page)
     if edit:
         try:
             await target.edit_text(text, reply_markup=kb)
@@ -584,18 +713,104 @@ async def cb_queue_refresh(callback: CallbackQuery) -> None:
     await _render_queue(callback.message, edit=True)
     await callback.answer()
 
+@router.callback_query(F.data.startswith("q:page:"))
+async def cb_queue_page(callback: CallbackQuery) -> None:
+    """Переключение страницы очереди."""
+    page = int(callback.data.split(":")[2])
+    await _render_queue(callback.message, edit=True, page=page)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("q:edit:"))
+async def cb_queue_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопка «Изменить»: ждём новое содержимое поста."""
+    post_id = int(callback.data.split(":")[2])
+    async with session_factory() as session:
+        post = await crud.get_post(session, post_id)
+    if post is None or post.status != "pending":
+        await callback.answer("Пост уже не в очереди.", show_alert=True)
+        await _render_queue(callback.message, edit=True)
+        return
+
+    await state.set_state(EditPostFSM.waiting_content)
+    await state.update_data(edit_post_id=post_id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:edit_cancel")
+    ]])
+    await callback.message.edit_text(
+        f"✏️ <b>Изменение поста #{post_id}</b>\n\n"
+        "Пришлите новое содержимое: текст и/или одно медиа. "
+        "Оно полностью заменит прежнее содержимое поста.\n"
+        "(Время публикации и каналы остаются прежними.)",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(EditPostFSM.waiting_content, F.data == "q:edit_cancel")
+async def cb_edit_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _render_queue(callback.message, edit=True)
+    await callback.answer("Изменение отменено.")
+
+
+@router.message(EditPostFSM.waiting_content)
+async def step_edit_content(message: Message, state: FSMContext) -> None:
+    """Принимает новое содержимое и сохраняет его в пост."""
+    data = await state.get_data()
+    post_id = data.get("edit_post_id")
+    await state.clear()
+    if not post_id:
+        await message.answer("Не нашёл пост. Откройте /queue заново.")
+        return
+
+    media = _extract_media(message)
+    if media:
+        text = message.html_text if message.caption else ""
+    else:
+        text = message.html_text if message.text else ""
+
+    if not media and not text:
+        await message.answer("Пришлите текст или медиа.")
+        return
+
+    async with session_factory() as session:
+        ok = await crud.update_post_content(
+            session, post_id,
+            text=text or "",
+            media=json.dumps(media, ensure_ascii=False) if media else "",
+        )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")
+    ]])
+    await message.answer(
+        f"✅ Содержимое поста #{post_id} обновлено." if ok
+        else f"Пост #{post_id} не найден или уже не в очереди.",
+        reply_markup=kb,
+    )
+
+@router.callback_query(F.data == "q:noop")
+async def cb_queue_noop(callback: CallbackQuery) -> None:
+    """Кнопка-счётчик страниц — ничего не делает."""
+    await callback.answer()
+
 @router.callback_query(F.data == "q:new")
 async def cb_queue_new(callback: CallbackQuery, state: FSMContext) -> None:
     """Запускает создание поста прямо из вкладки очереди."""
     if callback.message.chat.type != "private":
         await callback.answer(
-            "Создавать посты можно только в личке с ботом.", show_alert=True,
+            "Создавать посты можно только в личке с ботом.",
+            show_alert=True,
         )
         return
     await start_channel_choice(
-        callback.message, state, user_id=callback.from_user.id, edit=True,
+        callback.message,
+        state,
+        user_id=callback.from_user.id,
+        edit=True,
     )
     await callback.answer()
+
 
 @router.callback_query(F.data.startswith("q:post:"))
 async def cb_queue_post(callback: CallbackQuery) -> None:
@@ -671,6 +886,7 @@ async def cb_queue_cancelbatch(callback: CallbackQuery) -> None:
     await callback.answer(f"Отменено постов: {len(cancelled)}.")
     await _render_queue(callback.message, edit=True)
 
+
 @router.callback_query(F.data.startswith("q:resched:"))
 async def cb_queue_resched(callback: CallbackQuery, state: FSMContext) -> None:
     """Кнопка «Перенести»: запоминаем пост и ждём новую дату сообщением."""
@@ -686,9 +902,9 @@ async def cb_queue_resched(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(RescheduleFSM.waiting_time)
     await state.update_data(resched_post_id=post_id)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:resched_cancel")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:resched_cancel")]]
+    )
     await callback.message.edit_text(
         f"🕐 <b>Перенос поста #{post_id}</b>\n\n"
         f"Текущее время: <b>{to_local_str(post.publish_at)}</b> (МСК)\n\n"
@@ -736,13 +952,14 @@ async def step_resched_time(message: Message, state: FSMContext) -> None:
 
     await sched.schedule_post(post_id, new_time)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")]]
+    )
     await message.answer(
         f"✅ Пост #{post_id} перенесён на <b>{to_local_str(new_time)}</b> (МСК).",
         reply_markup=kb,
     )
+
 
 @router.callback_query(F.data.startswith("q:reschedbatch:"))
 async def cb_queue_reschedbatch(callback: CallbackQuery, state: FSMContext) -> None:
@@ -760,9 +977,9 @@ async def cb_queue_reschedbatch(callback: CallbackQuery, state: FSMContext) -> N
     await state.set_state(RescheduleFSM.waiting_time_batch)
     await state.update_data(resched_batch_id=batch_id)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:resched_cancel")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:resched_cancel")]]
+    )
     first = grp[0]
     await callback.message.edit_text(
         f"🕐 <b>Перенос группы из {len(grp)} постов</b>\n\n"
@@ -820,14 +1037,15 @@ async def step_reschedbatch_time(message: Message, state: FSMContext) -> None:
     for pid in post_ids:
         await sched.schedule_post(pid, new_time)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")]]
+    )
     await message.answer(
         f"✅ Перенесено постов: <b>{moved}</b> из {len(post_ids)}\n"
         f"Новое время: <b>{to_local_str(new_time)}</b> (МСК).",
         reply_markup=kb,
     )
+
 
 @router.message(Command("cancelpost"))
 async def cmd_cancelpost(message: Message) -> None:
@@ -844,8 +1062,7 @@ async def cmd_cancelpost(message: Message) -> None:
     except Exception:
         pass
     await message.answer(
-        f"Пост #{post_id} отменён." if ok
-        else f"Пост #{post_id} не найден или уже не в очереди."
+        f"Пост #{post_id} отменён." if ok else f"Пост #{post_id} не найден или уже не в очереди."
     )
 
 
@@ -880,7 +1097,8 @@ async def cmd_cancelbatch(message: Message) -> None:
     ids_str = ", ".join(f"#{i}" for i in cancelled)
     await message.answer(
         f"Отменена группа: {len(cancelled)} постов ({ids_str})."
-        if cancelled else "В группе не осталось активных постов."
+        if cancelled
+        else "В группе не осталось активных постов."
     )
 
 
@@ -900,8 +1118,6 @@ async def cmd_repost(message: Message) -> None:
         ok = await crud.reschedule_post(session, post_id, new_time)
     if ok:
         await sched.schedule_post(post_id, new_time)
-        await message.answer(
-            f"Пост #{post_id} перенесён на {to_local_str(new_time)} (МСК)."
-        )
+        await message.answer(f"Пост #{post_id} перенесён на {to_local_str(new_time)} (МСК).")
     else:
         await message.answer(f"Пост #{post_id} не найден или уже не в очереди.")

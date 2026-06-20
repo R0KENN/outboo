@@ -1,4 +1,5 @@
 """Разбор аргументов команд модерации (цель и длительность)."""
+
 import re
 
 from aiogram.types import Message

@@ -4,6 +4,7 @@
 канал публикации. Бот постит пост с кнопкой «Участвовать». Нажатие кнопки
 проверяет подписку на канал-условие и регистрирует участника.
 """
+
 import logging
 
 from aiogram import F, Router
@@ -12,15 +13,17 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
 )
 
-from database.engine import session_factory
 from database import crud
-from filters.admin import IsAdminOrModerator
+from database.engine import session_factory
+from keyboards.chat_picker import build_chat_picker
 from services import giveaway as gv
 from utils.datetime_parse import parse_publish_time, to_local_str
-from keyboards.chat_picker import build_chat_picker
 
 logger = logging.getLogger(__name__)
 router = Router(name="giveaway")
@@ -43,18 +46,22 @@ class NewGiveaway(StatesGroup):
 
 
 def _cancel_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="❌ Отмена", callback_data="gv:cancel_fsm")
-    ]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="gv:cancel_fsm")]]
+    )
 
 
 def _participate_kb(giveaway_id: int, count: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text=f"🎉 Участвовать ({count})",
-            callback_data=f"gv:join:{giveaway_id}",
-        )
-    ]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🎉 Участвовать ({count})",
+                    callback_data=f"gv:join:{giveaway_id}",
+                )
+            ]
+        ]
+    )
 
 
 @router.message(Command("newgiveaway"))
@@ -66,14 +73,18 @@ async def cmd_newgiveaway(message: Message, state: FSMContext) -> None:
     await state.set_state(NewGiveaway.require_channel)
 
     kb, shown = await build_chat_picker(
-        message.bot, message.from_user.id,
-        callback_prefix="gvreq", only_type="channel", show_manual=True,
+        message.bot,
+        message.from_user.id,
+        callback_prefix="gvreq",
+        only_type="channel",
+        show_manual=True,
     )
     # Добавим кнопку «без условия» поверх пикера
     from aiogram.types import InlineKeyboardButton
-    kb.inline_keyboard.insert(0, [
-        InlineKeyboardButton(text="🚫 Без обязательной подписки", callback_data="gvreq:0")
-    ])
+
+    kb.inline_keyboard.insert(
+        0, [InlineKeyboardButton(text="🚫 Без обязательной подписки", callback_data="gvreq:0")]
+    )
 
     await message.answer(
         "🎯 <b>Создаём конкурс</b>\n\n"
@@ -88,6 +99,7 @@ async def cb_cancel_fsm(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text("Создание конкурса отменено.")
     await callback.answer()
+
 
 @router.callback_query(NewGiveaway.require_channel, F.data.startswith("gvreq:"))
 async def cb_require_channel(callback: CallbackQuery, state: FSMContext) -> None:
@@ -117,6 +129,7 @@ async def cb_require_manual(callback: CallbackQuery, state: FSMContext) -> None:
         reply_markup=_cancel_kb(),
     )
     await callback.answer()
+
 
 @router.message(NewGiveaway.require_channel)
 async def step_require_channel(message: Message, state: FSMContext) -> None:
@@ -185,8 +198,11 @@ async def step_when(message: Message, state: FSMContext) -> None:
     await state.set_state(NewGiveaway.post_channel)
 
     kb, shown = await build_chat_picker(
-        message.bot, message.from_user.id,
-        callback_prefix="gvpost", only_type="channel", show_manual=True,
+        message.bot,
+        message.from_user.id,
+        callback_prefix="gvpost",
+        only_type="channel",
+        show_manual=True,
     )
     await message.answer(
         "Шаг 5. Куда опубликовать конкурс? Выберите канал:",
@@ -197,6 +213,7 @@ async def step_when(message: Message, state: FSMContext) -> None:
 async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot) -> None:
     """Создаёт конкурс в БД и публикует пост. message — для ответа пользователю."""
     from datetime import datetime
+
     data = await state.get_data()
     finish_at = datetime.fromisoformat(data["finish_at"])
 
@@ -219,9 +236,7 @@ async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot) -> 
         f"🏆 Победителей: {data['winners']}\n"
         f"⏰ Итоги: {to_local_str(finish_at)} (МСК)"
     )
-    sent = await bot.send_message(
-        chat.id, post_text, reply_markup=_participate_kb(g.id, 0)
-    )
+    sent = await bot.send_message(chat.id, post_text, reply_markup=_participate_kb(g.id, 0))
     async with session_factory() as session:
         await crud.set_giveaway_post(session, g.id, chat.id, sent.message_id)
     gv.schedule_giveaway_finish(bot, g.id, finish_at)
@@ -243,15 +258,20 @@ async def cb_post_channel(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Не удалось открыть канал.", show_alert=True)
         return
     await callback.message.edit_text("Публикую конкурс…")
-    await _finalize_giveaway(callback.message.model_copy(
-        update={"from_user": callback.from_user}), state, chat, callback.bot)
+    await _finalize_giveaway(
+        callback.message.model_copy(update={"from_user": callback.from_user}),
+        state,
+        chat,
+        callback.bot,
+    )
     await callback.answer()
 
 
 @router.callback_query(NewGiveaway.post_channel, F.data == "gvpost_manual")
 async def cb_post_manual(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
-        "Пришлите @username канала публикации.", reply_markup=_cancel_kb(),
+        "Пришлите @username канала публикации.",
+        reply_markup=_cancel_kb(),
     )
     await callback.answer()
 
@@ -290,6 +310,7 @@ async def cmd_endgiveaway(message: Message) -> None:
     await gv.finish_giveaway(message.bot, giveaway_id)
     await message.answer(f"Конкурс #{giveaway_id} завершён.")
 
+
 @router.callback_query(F.data.startswith("gv:join:"))
 async def cb_join(callback: CallbackQuery) -> None:
     """Нажатие «Участвовать»: проверка подписки и регистрация."""
@@ -325,8 +346,11 @@ async def cb_join(callback: CallbackQuery) -> None:
     # Регистрируем участника
     async with session_factory() as session:
         added = await crud.add_participant(
-            session, giveaway_id, user.id,
-            user.full_name or "", user.username or "",
+            session,
+            giveaway_id,
+            user.id,
+            user.full_name or "",
+            user.username or "",
         )
         count = await crud.count_participants(session, giveaway_id)
 

@@ -5,15 +5,16 @@
 Таймер завершения вешается на тот же APScheduler, что и отложенные посты,
 поэтому переживает перезапуск бота (восстанавливается через restore_giveaways).
 """
+
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from aiogram import Bot
 from apscheduler.triggers.date import DateTrigger
 
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 from services.scheduler import scheduler
 
 logger = logging.getLogger(__name__)
@@ -41,8 +42,7 @@ async def finish_giveaway(bot: Bot, giveaway_id: int) -> None:
     # Выбираем победителей
     if not participants:
         result_text = (
-            f"🎉 <b>Розыгрыш завершён</b>\n\n{title}\n\n"
-            f"Увы, участников не было — победителей нет."
+            f"🎉 <b>Розыгрыш завершён</b>\n\n{title}\n\nУвы, участников не было — победителей нет."
         )
         winners = []
     else:
@@ -71,8 +71,7 @@ async def finish_giveaway(bot: Bot, giveaway_id: int) -> None:
     for w in winners:
         try:
             await bot.send_message(
-                w.user_id,
-                f"🎉 Поздравляем! Вы выиграли в розыгрыше:\n<b>{title}</b>"
+                w.user_id, f"🎉 Поздравляем! Вы выиграли в розыгрыше:\n<b>{title}</b>"
             )
         except Exception:
             pass  # победитель мог не запускать бота в личке
@@ -83,7 +82,7 @@ async def finish_giveaway(bot: Bot, giveaway_id: int) -> None:
 def schedule_giveaway_finish(bot: Bot, giveaway_id: int, finish_at: datetime) -> None:
     """Ставит таймер завершения конкурса на общий планировщик."""
     if finish_at.tzinfo is None:
-        finish_at = finish_at.replace(tzinfo=timezone.utc)
+        finish_at = finish_at.replace(tzinfo=UTC)
     scheduler.add_job(
         finish_giveaway,
         trigger=DateTrigger(run_date=finish_at),
@@ -100,11 +99,11 @@ async def restore_giveaways(bot: Bot) -> None:
     """
     async with session_factory() as session:
         active = await crud.list_active_giveaways(session)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for g in active:
         finish_at = g.finish_at
         if finish_at.tzinfo is None:
-            finish_at = finish_at.replace(tzinfo=timezone.utc)
+            finish_at = finish_at.replace(tzinfo=UTC)
         if finish_at <= now:
             await finish_giveaway(bot, g.id)
         else:

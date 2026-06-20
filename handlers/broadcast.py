@@ -6,6 +6,7 @@
   3. Бот показывает, скольким подписчикам уйдёт, и просит подтвердить.
   4. По подтверждению запускается рассылка, в конце — сводка.
 """
+
 import asyncio
 import logging
 
@@ -14,12 +15,15 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
 )
 
 from config import settings
-from database.engine import session_factory
 from database import crud
+from database.engine import session_factory
 from services import broadcast as bc
 
 logger = logging.getLogger(__name__)
@@ -28,6 +32,7 @@ router = Router(name="broadcast")
 
 class Broadcast(StatesGroup):
     """Шаги диалога рассылки."""
+
     content = State()
     confirm = State()
 
@@ -45,8 +50,7 @@ async def cmd_subs(message: Message) -> None:
     async with session_factory() as session:
         total, active = await crud.count_subscribers(session)
     await message.answer(
-        f"👥 Подписчиков всего: <b>{total}</b>\n"
-        f"Активных (получат рассылку): <b>{active}</b>"
+        f"👥 Подписчиков всего: <b>{total}</b>\nАктивных (получат рассылку): <b>{active}</b>"
     )
 
 
@@ -90,13 +94,16 @@ async def step_content(message: Message, state: FSMContext) -> None:
         _, active = await crud.count_subscribers(session)
 
     await state.set_state(Broadcast.confirm)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Разослать", callback_data="bc:go"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="bc:cancel"),
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Разослать", callback_data="bc:go"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="bc:cancel"),
+            ]
+        ]
+    )
     await message.answer(
-        f"Сообщение принято. Получателей: <b>{active}</b>.\n"
-        f"Запустить рассылку?",
+        f"Сообщение принято. Получателей: <b>{active}</b>.\nЗапустить рассылку?",
         reply_markup=kb,
     )
 
@@ -136,7 +143,7 @@ async def cb_go(callback: CallbackQuery, state: FSMContext) -> None:
                 f"Всего: {summary['total']}\n"
                 f"Доставлено: {summary['sent']}\n"
                 f"Заблокировали бота: {summary['blocked']}\n"
-                f"Ошибок: {summary['failed']}"
+                f"Ошибок: {summary['failed']}",
             )
         except Exception as e:
             logger.exception("Ошибка рассылки: %s", e)

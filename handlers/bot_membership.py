@@ -4,15 +4,16 @@ Telegram присылает апдейт my_chat_member, когда меняет
 в чате (добавили, повысили до админа, удалили). На его основе ведём реестр
 managed_chats — он питает список чатов в личном меню и индивидуальные настройки.
 """
+
 import logging
 
 from aiogram import Bot, Router
 from aiogram.types import ChatMemberUpdated
 
 from database.crud import (
-    upsert_managed_chat,
     deactivate_managed_chat,
     get_or_create_chat_settings,
+    upsert_managed_chat,
 )
 from database.engine import session_factory
 
@@ -60,7 +61,9 @@ async def on_my_chat_member(event: ChatMemberUpdated, bot: Bot) -> None:
 
         logger.info(
             "Бот добавлен/обновлён в %s (%s), админ=%s.",
-            chat.title, chat.id, is_admin,
+            chat.title,
+            chat.id,
+            is_admin,
         )
 
         # Подсказка тому, кто добавил бота (если у нас есть с ним личка-диалог)
