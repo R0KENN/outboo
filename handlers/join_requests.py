@@ -1,8 +1,14 @@
-"""Автоприём заявок на вступление в группу/канал (раздел расширения).
+"""Заявки на вступление в группу/канал.
 
 Когда у чата включён режим «заявки», Telegram присылает chat_join_request.
 Если в настройках чата autoapprove_enabled=True — бот одобряет заявку
 автоматически. Бот должен быть админом с правом «приглашать пользователей».
+
+После одобрения (авто или вручную) можно отправить приветствие новому
+участнику в личку — это единственный способ «встретить» подписчика канала,
+т.к. в самом канале персональных сообщений нет. Личное сообщение пройдёт
+только если у пользователя открыта личка с ботом (для заявок Telegram это
+обычно разрешает).
 """
 
 import logging
@@ -17,33 +23,40 @@ logger = logging.getLogger(__name__)
 router = Router(name="join_requests")
 
 
+async def _send_join_welcome(bot: Bot, user, cfg) -> None:
+    """Отправляет приветствие в личку новому участнику, если включено."""
+    if not cfg.join_welcome_enabled or not cfg.join_welcome_text:
+        return
+    text = cfg.join_welcome_text.replace("{name}", user.full_name)
+    try:
+        await bot.send_message(user.id, text)
+        logger.info("Приветствие отправлено пользователю %s.", user.id)
+    except Exception as e:
+        # Пользователь не открывал личку с ботом или заблокировал его.
+        logger.info("Не удалось отправить приветствие %s: %s", user.id, e)
+
+
 @router.chat_join_request()
 async def on_join_request(event: ChatJoinRequest, bot: Bot) -> None:
-    """Одобряет заявку на вступление, если включён автоприём."""
+    """Одобряет заявку (если включён автоприём) и шлёт приветствие в ЛС."""
     chat_id = event.chat.id
+    user = event.from_user
 
     async with session_factory() as session:
         cfg = await get_or_create_chat_settings(session, chat_id)
 
+    # Автоприём выключен — заявку решают админы вручную.
+    # Но приветствие можно отправить сразу: заявка = явный интерес вступить,
+    # и Telegram разрешает боту написать заявителю в личку.
     if not cfg.autoapprove_enabled:
-        return  # автоприём выключен — оставляем заявку админам
+        await _send_join_welcome(bot, user, cfg)
+        return
 
     try:
-        await bot.approve_chat_join_request(
-            chat_id=chat_id,
-            user_id=event.from_user.id,
-        )
-        logger.info(
-            "Заявка одобрена: %s в %s.",
-            event.from_user.id,
-            chat_id,
-        )
-        # По желанию — личное приветствие новому участнику в ЛС
-        if cfg.welcome_enabled and cfg.welcome_text:
-            try:
-                text = cfg.welcome_text.replace("{name}", event.from_user.full_name)
-                await bot.send_message(event.from_user.id, text)
-            except Exception:
-                pass  # пользователь не открывал ЛС с ботом
+        await bot.approve_chat_join_request(chat_id=chat_id, user_id=user.id)
+        logger.info("Заявка одобрена: %s в %s.", user.id, chat_id)
     except Exception as e:
         logger.warning("Не удалось одобрить заявку в %s: %s", chat_id, e)
+        return
+
+    await _send_join_welcome(bot, user, cfg)

@@ -134,6 +134,53 @@ async def _is_channel_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     except Exception:
         return False
 
+async def _react_range(
+    bot: Bot,
+    message: Message,
+    chat_id: int,
+    from_id: int,
+    to_id: int,
+    emojis: list[str],
+) -> None:
+    """Ставит реакции на диапазон постов канала с живым прогрессом."""
+    total = to_id - from_id + 1
+    progress = await message.answer(
+        f"⏳ Ставлю реакции на посты #{from_id}–#{to_id} (всего {total})…"
+    )
+
+    ok = 0
+    fail = 0
+    done = 0
+    for mid in range(from_id, to_id + 1):
+        chosen = random.choice(emojis)
+        result = await safe_call(
+            lambda m=mid, e=chosen: bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=m,
+                reaction=[ReactionTypeEmoji(emoji=e)],
+            ),
+            delay=0.2,
+        )
+        if result is not None:
+            ok += 1
+        else:
+            fail += 1
+        done += 1
+
+        if done % 20 == 0:
+            try:
+                await progress.edit_text(
+                    f"⏳ Обработано {done} из {total}…\n"
+                    f"✅ Поставлено: {ok}  ⏭ Пропущено: {fail}"
+                )
+            except Exception:
+                pass
+
+    await progress.edit_text(
+        f"✅ <b>Готово.</b>\n"
+        f"Поставлено: <b>{ok}</b>\n"
+        f"Пропущено (нет поста / нельзя реагировать): <b>{fail}</b>"
+    )
 
 @router.message(Command("reactrange"))
 async def cmd_reactrange(message: Message, bot: Bot) -> None:
@@ -182,50 +229,7 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
         await message.answer("В настройках канала не выбран ни один эмодзи реакции.")
         return
 
-    await message.answer(
-        f"Ставлю реакции на посты #{from_id}–#{to_id}…\n"
-        "Это может занять время (Telegram ограничивает частоту)."
-    )
-
-    emojis = _parse_emojis(cfg.autoreact_emojis)
-    total = to_id - from_id + 1
-
-    progress = await message.answer(f"⏳ Обработано 0 из {total}…")
-
-    ok = 0
-    fail = 0
-    done = 0
-    for mid in range(from_id, to_id + 1):
-        chosen = random.choice(emojis)
-        result = await safe_call(
-            lambda m=mid, e=chosen: bot.set_message_reaction(
-                chat_id=chat.id,
-                message_id=m,
-                reaction=[ReactionTypeEmoji(emoji=e)],
-            ),
-            delay=0.2,
-        )
-        if result is not None:
-            ok += 1
-        else:
-            fail += 1
-        done += 1
-
-        # Обновляем прогресс каждые 20 постов, чтобы не упереться в лимиты Telegram.
-        if done % 20 == 0:
-            try:
-                await progress.edit_text(
-                    f"⏳ Обработано {done} из {total}…\n"
-                    f"✅ Поставлено: {ok}  ⏭ Пропущено: {fail}"
-                )
-            except Exception:
-                pass
-
-    await progress.edit_text(
-        f"✅ <b>Готово.</b>\n"
-        f"Поставлено: <b>{ok}</b>\n"
-        f"Пропущено (нет поста / нельзя реагировать): <b>{fail}</b>"
-    )
+    await _react_range(bot, message, chat.id, from_id, to_id, emojis=_parse_emojis(cfg.autoreact_emojis))
 
 
 class ReactRangeFSM(StatesGroup):
@@ -265,16 +269,36 @@ async def cb_react_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(ReactRangeFSM.waiting_range)
 async def step_react_range(message: Message, bot: Bot, state: FSMContext) -> None:
-    """Принимает диапазон и запускает простановку реакций."""
+    """Принимает диапазон и ставит реакции напрямую (без подмены текста)."""
     parts = (message.text or "").split()
     if len(parts) != 2 or not all(p.isdigit() for p in parts):
         await message.answer("Нужно два числа через пробел, например: 100 250")
         return
+
     from_id, to_id = int(parts[0]), int(parts[1])
+    if from_id > to_id:
+        from_id, to_id = to_id, from_id
+    if to_id - from_id > 500:
+        await message.answer("За раз не больше 500 постов. Сузьте диапазон.")
+        return
+
     data = await state.get_data()
     chat_id = data.get("react_chat_id")
     await state.clear()
 
-    # Переиспользуем логику команды: формируем фейковый текст и зовём cmd_reactrange
-    message.text = f"/reactrange {chat_id} {from_id} {to_id}"
-    await cmd_reactrange(message, bot)
+    if not chat_id:
+        await message.answer("Потерял канал. Откройте настройки канала заново.")
+        return
+
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, chat_id)
+
+    emojis = _parse_emojis(cfg.autoreact_emojis)
+    if not emojis:
+        await message.answer(
+            "В настройках канала не выбран ни один эмодзи реакции.\n"
+            "Откройте настройки канала и задайте эмодзи."
+        )
+        return
+
+    await _react_range(bot, message, chat_id, from_id, to_id, emojis=emojis)

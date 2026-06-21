@@ -30,6 +30,12 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
                 callback_data=f"set:toggle:autoapprove_enabled:{cid}",
             )
         )
+        b.row(
+        InlineKeyboardButton(
+            text=_mark("Приветствие в ЛС при заявке", cfg.join_welcome_enabled),
+            callback_data=f"set:toggle:join_welcome_enabled:{cfg.chat_id}",
+        )
+    )
     else:
         # ── Настройки ГРУППЫ ──
         b.row(

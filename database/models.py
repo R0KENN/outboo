@@ -49,6 +49,14 @@ class ChatSettings(Base):
     quarantine_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # ── Автоприём заявок на вступление (новое) ──
     autoapprove_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Приветствие в личку при одобрении заявки на вступление в канал/группу.
+    # Отдельно от группового welcome_text: для канала «чата» нет, пишем в ЛС.
+    join_welcome_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    join_welcome_text: Mapped[str] = mapped_column(
+        Text, default="Добро пожаловать, {name}! Спасибо, что подписались."
+    )
 
     # ── Автореакции на посты канала (новое) ──
     autoreact_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
