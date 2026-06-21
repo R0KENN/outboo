@@ -70,9 +70,18 @@ async def react_to_post(message: Message, bot: Bot) -> None:
     """Базовая автореакция на новый пост канала (обычный эмодзи)."""
     async with session_factory() as session:
         cfg = await get_or_create_chat_settings(session, message.chat.id)
+
     if not cfg.autoreact_enabled:
+        logger.info("Пост в %s: автореакции выключены — пропускаю.", message.chat.id)
         return
-    await _apply_reaction(bot, message.chat.id, message.message_id, cfg)
+
+    if not _parse_emojis(cfg.autoreact_emojis):
+        logger.info("Пост в %s: список эмодзи пуст — нечего ставить.", message.chat.id)
+        return
+
+    ok = await _apply_reaction(bot, message.chat.id, message.message_id, cfg)
+    if ok:
+        logger.info("Реакция поставлена на %s/%s.", message.chat.id, message.message_id)
 
 
 @router.message_reaction()
@@ -179,9 +188,13 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
     )
 
     emojis = _parse_emojis(cfg.autoreact_emojis)
+    total = to_id - from_id + 1
+
+    progress = await message.answer(f"⏳ Обработано 0 из {total}…")
 
     ok = 0
     fail = 0
+    done = 0
     for mid in range(from_id, to_id + 1):
         chosen = random.choice(emojis)
         result = await safe_call(
@@ -196,9 +209,22 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
             ok += 1
         else:
             fail += 1
+        done += 1
 
-    await message.answer(
-        f"Готово. Поставлено: <b>{ok}</b>. Пропущено (нет поста/нельзя): <b>{fail}</b>."
+        # Обновляем прогресс каждые 20 постов, чтобы не упереться в лимиты Telegram.
+        if done % 20 == 0:
+            try:
+                await progress.edit_text(
+                    f"⏳ Обработано {done} из {total}…\n"
+                    f"✅ Поставлено: {ok}  ⏭ Пропущено: {fail}"
+                )
+            except Exception:
+                pass
+
+    await progress.edit_text(
+        f"✅ <b>Готово.</b>\n"
+        f"Поставлено: <b>{ok}</b>\n"
+        f"Пропущено (нет поста / нельзя реагировать): <b>{fail}</b>"
     )
 
 

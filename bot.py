@@ -95,7 +95,18 @@ async def main() -> None:
         logger.info("Бот в режиме long polling.")
         await dp.start_polling(
             bot,
-            allowed_updates=dp.resolve_used_update_types(),
+            allowed_updates=[
+                "message",
+                "edited_message",
+                "channel_post",
+                "edited_channel_post",
+                "callback_query",
+                "my_chat_member",
+                "chat_member",
+                "chat_join_request",
+                "message_reaction",
+                "message_reaction_count",
+            ],
         )
     finally:
         from services.scheduler import scheduler
