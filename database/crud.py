@@ -211,7 +211,6 @@ async def bump_stat(session: AsyncSession, chat_id: int, metric: str, amount: in
 
 async def get_stats_period(session: AsyncSession, chat_id: int, days: int) -> dict[str, int]:
     """Суммирует метрики за последние N дней. Возвращает {metric: сумма}."""
-    from datetime import datetime as _dt2, UTC as _UTC2
     since = (_dt.now(_UTC).date() - _timedelta(days=days - 1)).isoformat()
     stmt = (
         select(Stat.metric, _func.sum(Stat.value))

@@ -464,11 +464,11 @@ async def _send_preview(bot, chat_id: int, data: dict) -> None:
     keyboard = _build_keyboard(data.get("buttons", ""))
 
     if not media:
-        await bot.send_message(chat_id, text or "(пустой пост)", reply_markup=keyboard)
+        await bot.send_message(chat_id, text or "(пустой пост)", parse_mode="HTML", reply_markup=keyboard)
     elif len(media) == 1:
         item = media[0]
         mtype, file_id = item.get("type"), item.get("file_id")
-        common = dict(caption=text or None, reply_markup=keyboard)
+        common = dict(caption=text or None, parse_mode="HTML", reply_markup=keyboard)
         if mtype == "photo":
             await bot.send_photo(chat_id, file_id, **common)
         elif mtype == "video":
@@ -478,7 +478,7 @@ async def _send_preview(bot, chat_id: int, data: dict) -> None:
         elif mtype == "audio":
             await bot.send_audio(chat_id, file_id, **common)
         else:
-            await bot.send_message(chat_id, text or "(пост)", reply_markup=keyboard)
+            await bot.send_message(chat_id, text or "(пост)", parse_mode="HTML", reply_markup=keyboard)
     else:
         from services.scheduler import _INPUT_MEDIA
 
@@ -490,10 +490,11 @@ async def _send_preview(bot, chat_id: int, data: dict) -> None:
             kwargs = {"media": item.get("file_id")}
             if i == 0 and text:
                 kwargs["caption"] = text
+                kwargs["parse_mode"] = "HTML"
             group.append(cls(**kwargs))
         await bot.send_media_group(chat_id, media=group)
         if keyboard:
-            await bot.send_message(chat_id, "⬆️ кнопки поста", reply_markup=keyboard)
+            await bot.send_message(chat_id, "⬆️ кнопки поста", parse_mode="HTML", reply_markup=keyboard)
 
 
 async def _finalize_posts(message: Message, state: FSMContext, delete_after: int) -> None:

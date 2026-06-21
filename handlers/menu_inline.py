@@ -65,7 +65,10 @@ def _as_user_message(callback: CallbackQuery) -> Message:
     # Подстраховка: если подмена не сработала (изменилось поведение pydantic),
     # явно проставляем from_user, чтобы не уйти с id бота.
     if msg.from_user is None or msg.from_user.id != callback.from_user.id:
-        object.__setattr__(msg, "from_user", callback.from_user)
+        try:
+            object.__setattr__(msg, "from_user", callback.from_user)
+        except Exception:
+            logger.warning("Не удалось подменить from_user в callback.message")
     return msg
 
 

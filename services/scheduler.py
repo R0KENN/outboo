@@ -102,6 +102,8 @@ async def _publish_post(post_id: int) -> None:
         delete_after = post.delete_after
         repeat_rule = post.repeat_rule
         publish_at = post.publish_at
+        batch_id = post.batch_id
+        created_by = post.created_by
 
     sent_message_ids: list[int] = []
     try:
@@ -194,8 +196,9 @@ async def _publish_post(post_id: int) -> None:
                 parse_mode=parse_mode,
                 publish_at=next_time,
                 delete_after=delete_after,
-                created_by=0,
+                created_by=created_by,
                 repeat_rule=repeat_rule,
+                batch_id=batch_id,
             )
         _schedule_one(new_post.id, next_time)
 

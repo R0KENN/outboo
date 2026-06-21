@@ -29,7 +29,11 @@ def parse_publish_time(text: str) -> datetime | None:
             continue
         # Для формата без года подставляем текущий
         if "%Y" not in fmt and "%y" not in fmt:
-            dt = dt.replace(year=datetime.now(DEFAULT_TZ).year)
+            now_local = datetime.now(DEFAULT_TZ)
+            dt = dt.replace(year=now_local.year)
+            # Если дата без года оказалась в прошлом — значит, имелся в виду следующий год
+            if dt.replace(tzinfo=DEFAULT_TZ) <= now_local:
+                dt = dt.replace(year=now_local.year + 1)
         parsed = dt
         break
 

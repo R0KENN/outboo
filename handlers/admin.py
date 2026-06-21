@@ -108,7 +108,7 @@ async def cmd_addword(message: Message) -> None:
         return
     word = message.text.partition(" ")[2].strip()
     if not word:
-        await message.answer("Формат: /addword <слово>")
+        await message.answer("Формат: /addword &lt;слово&gt;")
         return
     async with session_factory() as session:
         ok = await crud.add_stopword(session, message.chat.id, word)
@@ -122,7 +122,7 @@ async def cmd_delword(message: Message) -> None:
         return
     word = message.text.partition(" ")[2].strip()
     if not word:
-        await message.answer("Формат: /delword <слово>")
+        await message.answer("Формат: /delword &lt;слово&gt;")
         return
     async with session_factory() as session:
         ok = await crud.remove_stopword(session, message.chat.id, word)
@@ -152,7 +152,7 @@ async def cmd_adddomain(message: Message) -> None:
         return
     domain = message.text.partition(" ")[2].strip()
     if not domain:
-        await message.answer("Формат: /adddomain <домен>, например example.com")
+        await message.answer("Формат: /adddomain &lt;домен&gt;, например example.com")
         return
     async with session_factory() as session:
         ok = await crud.add_domain(session, message.chat.id, domain)
@@ -166,7 +166,7 @@ async def cmd_deldomain(message: Message) -> None:
         return
     domain = message.text.partition(" ")[2].strip()
     if not domain:
-        await message.answer("Формат: /deldomain <домен>")
+        await message.answer("Формат: /deldomain &lt;домен&gt;")
         return
     async with session_factory() as session:
         ok = await crud.remove_domain(session, message.chat.id, domain)
