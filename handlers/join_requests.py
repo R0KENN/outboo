@@ -27,9 +27,12 @@ async def _send_join_welcome(bot: Bot, user, cfg) -> None:
     """Отправляет приветствие в личку новому участнику, если включено."""
     if not cfg.join_welcome_enabled or not cfg.join_welcome_text:
         return
-    text = cfg.join_welcome_text.replace("{name}", user.full_name)
+    from aiogram.utils.text_decorations import html_decoration
+
+    safe_name = html_decoration.quote(user.full_name or "")
+    text = cfg.join_welcome_text.replace("{name}", safe_name)
     try:
-        await bot.send_message(user.id, text)
+        await bot.send_message(user.id, text, parse_mode="HTML")
         logger.info("Приветствие отправлено пользователю %s.", user.id)
     except Exception as e:
         # Пользователь не открывал личку с ботом или заблокировал его.

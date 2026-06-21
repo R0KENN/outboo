@@ -173,8 +173,8 @@ async def cmd_set_welcome(message: Message) -> None:
     """Задаёт текст приветствия. Используйте {name} для подстановки имени."""
     if not await _is_admin(message, message.chat.id, message.from_user.id):
         return
-    # Берём текст после команды
-    text = message.text.partition(" ")[2].strip()
+    # Берём текст после команды с сохранением форматирования (HTML)
+    text = (message.html_text or "").partition(" ")[2].strip()
     if not text:
         await message.answer(
             "Укажите текст после команды.\nПример: /setwelcome Привет, {name}! Читай правила."
@@ -195,8 +195,8 @@ async def cmd_set_join_welcome(message: Message) -> None:
     """
     if not await _is_admin(message, message.chat.id, message.from_user.id):
         return
-    # Берём текст после команды
-    text = message.text.partition(" ")[2].strip()
+    # Берём текст после команды с сохранением форматирования (HTML)
+    text = (message.html_text or "").partition(" ")[2].strip()
     if not text:
         await message.answer(
             "Укажите текст после команды.\n"
@@ -215,7 +215,7 @@ async def cmd_set_rules(message: Message) -> None:
     """Задаёт текст правил, который добавляется к приветствию."""
     if not await _is_admin(message, message.chat.id, message.from_user.id):
         return
-    text = message.text.partition(" ")[2].strip()
+    text = (message.html_text or "").partition(" ")[2].strip()
     if not text:
         await message.answer("Укажите текст правил после команды.")
         return

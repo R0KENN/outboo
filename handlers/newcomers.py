@@ -53,7 +53,9 @@ async def _send_welcome(bot, chat_id: int, user, cfg) -> None:
     """Отправляет приветствие с подстановкой имени и автоудалением."""
     if not cfg.welcome_enabled:
         return
-    text = cfg.welcome_text.replace("{name}", user.full_name)
+    from aiogram.utils.text_decorations import html_decoration
+
+    text = cfg.welcome_text.replace("{name}", html_decoration.quote(user.full_name or ""))
     if cfg.rules_text:
         text += f"\n\n{cfg.rules_text}"
     msg = await bot.send_message(chat_id, text)
