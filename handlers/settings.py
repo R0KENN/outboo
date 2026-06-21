@@ -71,6 +71,15 @@ async def on_settings_callback(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
+    if action == "joinwelcometext":
+        await callback.message.answer(
+            "Чтобы задать текст приветствия в ЛС, отправьте в этом канале команду:\n"
+            "<code>/setjoinwelcome ваш текст</code>\n"
+            "Доступен плейсхолдер {name}."
+        )
+        await callback.answer()
+        return
+
     # Последний элемент callback_data — всегда chat_id
     chat_id = int(parts[-1])
     # Тип чата нужен для правильного набора кнопок настроек
@@ -177,6 +186,29 @@ async def cmd_set_welcome(message: Message) -> None:
         await session.commit()
     await message.answer("Текст приветствия обновлён.")
 
+@router.message(Command("setjoinwelcome"))
+async def cmd_set_join_welcome(message: Message) -> None:
+    """Задаёт текст приветствия в ЛС новым подписчикам (по заявке).
+
+    Используйте {name} для подстановки имени. Отправьте команду в нужном
+    канале/группе. Бот должен быть админом, а у чата включён режим заявок.
+    """
+    if not await _is_admin(message, message.chat.id, message.from_user.id):
+        return
+    # Берём текст после команды
+    text = message.text.partition(" ")[2].strip()
+    if not text:
+        await message.answer(
+            "Укажите текст после команды.\n"
+            "Пример: /setjoinwelcome Привет, {name}! Спасибо за подписку 🎉"
+        )
+        return
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, message.chat.id)
+        cfg.join_welcome_text = text
+        cfg.join_welcome_enabled = True
+        await session.commit()
+    await message.answer("Приветствие в ЛС обновлено и включено.")
 
 @router.message(Command("setrules"))
 async def cmd_set_rules(message: Message) -> None:

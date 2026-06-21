@@ -42,16 +42,9 @@ def _parse_emojis(raw: str) -> list[str]:
 
 
 async def _apply_reaction(bot: Bot, chat_id: int, message_id: int, cfg) -> bool:
-    """Ставит одну реакцию на сообщение по настройкам канала.
-
-    Возвращает True, если реакция поставлена. Кастом-эмодзи здесь не ставим
-    (его нельзя инициировать) — для кастома есть join-логика в on_reaction.
-    """
     emojis = _parse_emojis(cfg.autoreact_emojis)
     if not emojis:
         return False
-
-    # Бот ставит ровно одну реакцию: берём случайную из набора.
     chosen = random.choice(emojis)
     try:
         await bot.set_message_reaction(
@@ -61,7 +54,20 @@ async def _apply_reaction(bot: Bot, chat_id: int, message_id: int, cfg) -> bool:
         )
         return True
     except Exception as e:
-        logger.warning("Автореакция в %s/%s не поставлена: %s", chat_id, message_id, e)
+        logger.warning(
+            "Автореакция %s в %s/%s не поставлена: %s", chosen, chat_id, message_id, e
+        )
+        # Фолбэк на гарантированно валидный 👍
+        if chosen != "👍":
+            try:
+                await bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[ReactionTypeEmoji(emoji="👍")],
+                )
+                return True
+            except Exception:
+                pass
         return False
 
 

@@ -36,6 +36,12 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
                 callback_data=f"set:toggle:join_welcome_enabled:{cid}",
             )
         )
+        b.row(
+            InlineKeyboardButton(
+                text="✏️ Текст приветствия в ЛС",
+                callback_data=f"set:joinwelcometext:{cid}",
+            )
+        )
     else:
         # ── Настройки ГРУППЫ ──
         b.row(
@@ -150,8 +156,8 @@ def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-# Разрешённый Telegram базовый набор эмодзи для реакций (часть популярных)
-REACTION_CHOICES = ["👍", "❤️", "🔥", "🎉", "👏", "😁", "🤔", "🙏", "💯", "⚡"]
+# Только эмодзи из официального whitelist реакций Telegram
+REACTION_CHOICES = ["👍", "👎", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤔", "🙏"]
 
 
 def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
