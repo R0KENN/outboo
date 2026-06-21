@@ -31,11 +31,11 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
             )
         )
         b.row(
-        InlineKeyboardButton(
-            text=_mark("Приветствие в ЛС при заявке", cfg.join_welcome_enabled),
-            callback_data=f"set:toggle:join_welcome_enabled:{cfg.chat_id}",
+            InlineKeyboardButton(
+                text=f"{_mark(cfg.join_welcome_enabled)} Приветствие в ЛС при заявке",
+                callback_data=f"set:toggle:join_welcome_enabled:{cid}",
+            )
         )
-    )
     else:
         # ── Настройки ГРУППЫ ──
         b.row(
