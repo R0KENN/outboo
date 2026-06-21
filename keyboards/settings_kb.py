@@ -187,10 +187,12 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     for i in range(0, len(row_buttons), 5):
         b.row(*row_buttons[i : i + 5])
 
-    b.row(InlineKeyboardButton(
-        text="🔁 Реакции на старые посты",
-        callback_data=f"react:oldposts:{cid}",
-    ))
+    b.row(
+        InlineKeyboardButton(
+            text="🔁 Реакции на старые посты",
+            callback_data=f"react:oldposts:{cid}",
+        )
+    )
 
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"set:refresh:{cid}"))
     return b.as_markup()

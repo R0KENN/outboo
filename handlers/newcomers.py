@@ -145,7 +145,7 @@ async def on_member_update(event: ChatMemberUpdated) -> None:
 async def on_captcha_answer(callback: CallbackQuery) -> None:
     """Обрабатывает нажатие кнопки капчи."""
     parts = callback.data.split(":")
-    _ = parts[1]              # тип (ok | ans) — пока не используется
+    _ = parts[1]  # тип (ok | ans) — пока не используется
     chat_id = int(parts[2])
     user_id = int(parts[3])
     answer = parts[4] if len(parts) > 4 else "ok"

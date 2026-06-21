@@ -12,22 +12,25 @@
 import logging
 import random
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     Message,
     MessageReactionUpdated,
     ReactionTypeCustomEmoji,
     ReactionTypeEmoji,
 )
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import settings as app_settings
 from database.crud import get_or_create_chat_settings
 from database.engine import session_factory
+from utils.rate_limit import safe_call
 
 logger = logging.getLogger(__name__)
 router = Router(name="autoreact")
@@ -175,18 +178,17 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
         "Это может занять время (Telegram ограничивает частоту)."
     )
 
-    from utils.rate_limit import safe_call
-    import random as _random
-    from aiogram.types import ReactionTypeEmoji as _RTE
-
     emojis = _parse_emojis(cfg.autoreact_emojis)
+
     ok = 0
     fail = 0
     for mid in range(from_id, to_id + 1):
-        chosen = _random.choice(emojis)
+        chosen = random.choice(emojis)
         result = await safe_call(
             lambda m=mid, e=chosen: bot.set_message_reaction(
-                chat_id=chat.id, message_id=m, reaction=[_RTE(emoji=e)],
+                chat_id=chat.id,
+                message_id=m,
+                reaction=[ReactionTypeEmoji(emoji=e)],
             ),
             delay=0.2,
         )
@@ -198,6 +200,7 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
     await message.answer(
         f"Готово. Поставлено: <b>{ok}</b>. Пропущено (нет поста/нельзя): <b>{fail}</b>."
     )
+
 
 class ReactRangeFSM(StatesGroup):
     waiting_range = State()
@@ -213,9 +216,9 @@ async def cb_react_oldposts(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.set_state(ReactRangeFSM.waiting_range)
     await state.update_data(react_chat_id=chat_id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="⬅️ Отмена", callback_data="react:cancel")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Отмена", callback_data="react:cancel")]]
+    )
     await callback.message.edit_text(
         "🔁 <b>Реакции на старые посты</b>\n\n"
         "Пришлите диапазон id постов через пробел: <code>from to</code>\n"

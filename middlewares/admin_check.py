@@ -1,6 +1,7 @@
 """Middleware определения прав пользователя (раздел 6, безопасность)."""
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -13,8 +14,6 @@ from database.crud import get_moderator
 from database.engine import session_factory
 
 logger = logging.getLogger(__name__)
-
-import time
 
 # Кеш статуса админа: (chat_id, user_id) -> (is_admin, expires_at)
 _admin_cache: dict[tuple[int, int], tuple[bool, float]] = {}

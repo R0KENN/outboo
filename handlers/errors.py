@@ -6,6 +6,7 @@
 - TelegramBadRequest «message is not modified» — безвредно, глушим;
 - остальное — логируем со стеком, чтобы процесс не падал.
 """
+
 import logging
 
 from aiogram import Router

@@ -1,4 +1,5 @@
 """Слой доступа к данным. Вся работа с БД — только здесь (раздел 3 ТЗ)."""
+
 from datetime import date as _date
 from datetime import datetime
 from datetime import datetime as _dt
@@ -190,6 +191,7 @@ async def cancel_batch(session: AsyncSession, batch_id: str) -> list[int]:
 # Статистика (раздел 4.5 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
 
+
 async def bump_stat(session: AsyncSession, chat_id: int, metric: str, amount: int = 1) -> None:
     """Увеличивает счётчик метрики за сегодня. Переносимый upsert (select+update).
 
@@ -361,6 +363,7 @@ async def get_moderation_log(
 # ──────────────────────────────────────────────────────────────────────────
 # База подписчиков и рассылки (раздел 4.6 ТЗ)
 # ──────────────────────────────────────────────────────────────────────────
+
 
 async def upsert_subscriber(
     session: AsyncSession,
@@ -619,9 +622,12 @@ async def list_managed_chats(session: AsyncSession, only_active: bool = True) ->
     stmt = stmt.order_by(ManagedChat.title.asc())
     return list((await session.execute(stmt)).scalars().all())
 
+
 async def update_post_content(
-    session: AsyncSession, post_id: int,
-    text: str | None = None, media: str | None = None,
+    session: AsyncSession,
+    post_id: int,
+    text: str | None = None,
+    media: str | None = None,
     buttons: str | None = None,
 ) -> bool:
     """Обновляет содержимое pending-поста. True при успехе."""

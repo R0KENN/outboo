@@ -106,8 +106,14 @@ async def cmd_export(message: Message) -> None:
                 .all()
             )
         log_rows = [
-            [log.chat_id, log.action, log.actor_id, log.target_id, log.reason,
-             to_local_str(log.created_at) if log.created_at else ""]
+            [
+                log.chat_id,
+                log.action,
+                log.actor_id,
+                log.target_id,
+                log.reason,
+                to_local_str(log.created_at) if log.created_at else "",
+            ]
             for log in logs
         ]
         n_logs = await sheets.write_worksheet(

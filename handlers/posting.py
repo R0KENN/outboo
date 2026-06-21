@@ -28,7 +28,9 @@ from database import crud
 from database.crud import get_managed_chat, list_managed_chats
 from database.engine import session_factory
 from services import scheduler as sched
+from services.scheduler import _build_keyboard, _parse_media
 from utils.datetime_parse import parse_publish_time, to_local_str
+from utils.pagination import nav_row, paginate
 
 logger = logging.getLogger(__name__)
 router = Router(name="posting")
@@ -36,12 +38,13 @@ router = Router(name="posting")
 
 class NewPost(StatesGroup):
     """Шаги диалога создания поста."""
+
     channel = State()
     content = State()
     buttons = State()
     when = State()
     delete_after = State()
-    preview = State()   # ← добавить
+    preview = State()  # ← добавить
 
 
 def _cancel_kb() -> InlineKeyboardMarkup:
@@ -55,6 +58,7 @@ class RescheduleFSM(StatesGroup):
 
     waiting_time = State()  # перенос одного поста
     waiting_time_batch = State()  # перенос всей группы
+
 
 class EditPostFSM(StatesGroup):
     waiting_content = State()
@@ -452,16 +456,15 @@ async def step_when(message: Message, state: FSMContext) -> None:
         reply_markup=kb,
     )
 
+
 async def _send_preview(bot, chat_id: int, data: dict) -> None:
     """Отправляет пользователю предпросмотр поста ровно так, как он уйдёт в канал."""
-    from services.scheduler import _parse_media, _build_keyboard
     text = data.get("text", "")
     media = _parse_media(data.get("media", ""))
     keyboard = _build_keyboard(data.get("buttons", ""))
 
     if not media:
-        await bot.send_message(chat_id, text or "(пустой пост)",
-                               reply_markup=keyboard)
+        await bot.send_message(chat_id, text or "(пустой пост)", reply_markup=keyboard)
     elif len(media) == 1:
         item = media[0]
         mtype, file_id = item.get("type"), item.get("file_id")
@@ -478,6 +481,7 @@ async def _send_preview(bot, chat_id: int, data: dict) -> None:
             await bot.send_message(chat_id, text or "(пост)", reply_markup=keyboard)
     else:
         from services.scheduler import _INPUT_MEDIA
+
         group = []
         for i, item in enumerate(media):
             cls = _INPUT_MEDIA.get(item.get("type"))
@@ -490,6 +494,7 @@ async def _send_preview(bot, chat_id: int, data: dict) -> None:
         await bot.send_media_group(chat_id, media=group)
         if keyboard:
             await bot.send_message(chat_id, "⬆️ кнопки поста", reply_markup=keyboard)
+
 
 async def _finalize_posts(message: Message, state: FSMContext, delete_after: int) -> None:
     """Создаёт записи постов во все выбранные каналы и ставит их в планировщик."""
@@ -580,18 +585,21 @@ async def _show_preview_step(message: Message, state: FSMContext) -> None:
         await message.answer(f"Не удалось отрисовать превью: {e}")
 
     titles = data.get("channel_titles", [])
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     publish_at = datetime.fromisoformat(data["publish_at"])
-    is_now = (publish_at - datetime.now(timezone.utc)).total_seconds() < 90
+    is_now = (publish_at - datetime.now(UTC)).total_seconds() < 90
     when = "сейчас" if is_now else f"{to_local_str(publish_at)} (МСК)"
     da = data.get("delete_after", 0)
     da_note = f"\nАвтоудаление через {da // 60} мин." if da else ""
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Опубликовать", callback_data="post:confirm")],
-        [InlineKeyboardButton(text="✏️ Изменить текст", callback_data="post:edittext")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
-    ])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Опубликовать", callback_data="post:confirm")],
+            [InlineKeyboardButton(text="✏️ Изменить текст", callback_data="post:edittext")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="post:cancel_fsm")],
+        ]
+    )
     await message.answer(
         f"Каналы: <b>{', '.join(titles) if titles else '—'}</b>\n"
         f"Время: <b>{when}</b>{da_note}\n\n"
@@ -606,7 +614,8 @@ async def cb_confirm_post(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     await _finalize_posts(
         callback.message.model_copy(update={"from_user": callback.from_user}),
-        state, delete_after=data.get("delete_after", 0),
+        state,
+        delete_after=data.get("delete_after", 0),
     )
     await callback.answer()
 
@@ -630,7 +639,6 @@ async def cb_edit_text(callback: CallbackQuery, state: FSMContext) -> None:
 # ──────────────────────────────────────────────────────────────────────────
 def _queue_list_kb(groups, page: int = 0) -> InlineKeyboardMarkup:
     """Список запланированных постов кнопками, с пагинацией."""
-    from utils.pagination import paginate, nav_row
     page_items, pages, page = paginate(groups, page)
 
     b = InlineKeyboardBuilder()
@@ -686,10 +694,12 @@ async def _render_queue(target, edit: bool = False, page: int = 0) -> None:
         groups = await crud.list_pending_grouped(session)
     if not groups:
         text = "📋 <b>Очередь пуста.</b>\n\nСоздайте первый отложенный пост:"
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Новый пост", callback_data="q:new")],
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home")],
-        ])
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Новый пост", callback_data="q:new")],
+                [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home")],
+            ]
+        )
     else:
         text = "📋 <b>Запланированные посты</b>\nНажмите на пост для управления:"
         kb = _queue_list_kb(groups, page)
@@ -713,12 +723,14 @@ async def cb_queue_refresh(callback: CallbackQuery) -> None:
     await _render_queue(callback.message, edit=True)
     await callback.answer()
 
+
 @router.callback_query(F.data.startswith("q:page:"))
 async def cb_queue_page(callback: CallbackQuery) -> None:
     """Переключение страницы очереди."""
     page = int(callback.data.split(":")[2])
     await _render_queue(callback.message, edit=True, page=page)
     await callback.answer()
+
 
 @router.callback_query(F.data.startswith("q:edit:"))
 async def cb_queue_edit(callback: CallbackQuery, state: FSMContext) -> None:
@@ -733,9 +745,9 @@ async def cb_queue_edit(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.set_state(EditPostFSM.waiting_content)
     await state.update_data(edit_post_id=post_id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:edit_cancel")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Отмена", callback_data="q:edit_cancel")]]
+    )
     await callback.message.edit_text(
         f"✏️ <b>Изменение поста #{post_id}</b>\n\n"
         "Пришлите новое содержимое: текст и/или одно медиа. "
@@ -775,24 +787,28 @@ async def step_edit_content(message: Message, state: FSMContext) -> None:
 
     async with session_factory() as session:
         ok = await crud.update_post_content(
-            session, post_id,
+            session,
+            post_id,
             text=text or "",
             media=json.dumps(media, ensure_ascii=False) if media else "",
         )
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")
-    ]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")]]
+    )
     await message.answer(
-        f"✅ Содержимое поста #{post_id} обновлено." if ok
+        f"✅ Содержимое поста #{post_id} обновлено."
+        if ok
         else f"Пост #{post_id} не найден или уже не в очереди.",
         reply_markup=kb,
     )
+
 
 @router.callback_query(F.data == "q:noop")
 async def cb_queue_noop(callback: CallbackQuery) -> None:
     """Кнопка-счётчик страниц — ничего не делает."""
     await callback.answer()
+
 
 @router.callback_query(F.data == "q:new")
 async def cb_queue_new(callback: CallbackQuery, state: FSMContext) -> None:

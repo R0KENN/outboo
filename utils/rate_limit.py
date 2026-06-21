@@ -3,9 +3,11 @@
 Соблюдает лимиты: держит паузу между вызовами и корректно реагирует на
 TelegramRetryAfter (ждёт ровно указанное время и повторяет вызов).
 """
+
 import asyncio
 import logging
-from typing import Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from aiogram.exceptions import TelegramRetryAfter
 
@@ -36,8 +38,7 @@ async def safe_call(
             return result
         except TelegramRetryAfter as e:
             wait = e.retry_after + 1
-            logger.warning("Флуд-контроль: пауза %s сек (попытка %s).",
-                           wait, attempt + 1)
+            logger.warning("Флуд-контроль: пауза %s сек (попытка %s).", wait, attempt + 1)
             await asyncio.sleep(wait)
         except Exception as e:
             logger.warning("Массовая операция: вызов не удался: %s", e)

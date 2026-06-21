@@ -1,4 +1,5 @@
 """Универсальная пагинация для inline-списков."""
+
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -11,7 +12,7 @@ def paginate(items: list, page: int, page_size: int = PAGE_SIZE):
     pages = max(1, (total + page_size - 1) // page_size)
     page = max(0, min(page, pages - 1))
     start = page * page_size
-    return items[start:start + page_size], pages, page
+    return items[start : start + page_size], pages, page
 
 
 def nav_row(b: InlineKeyboardBuilder, prefix: str, page: int, pages: int) -> None:
@@ -25,8 +26,7 @@ def nav_row(b: InlineKeyboardBuilder, prefix: str, page: int, pages: int) -> Non
     row = []
     if page > 0:
         row.append(InlineKeyboardButton(text="‹", callback_data=f"{prefix}:{page - 1}"))
-    row.append(InlineKeyboardButton(
-        text=f"{page + 1}/{pages}", callback_data="q:noop"))
+    row.append(InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="q:noop"))
     if page < pages - 1:
         row.append(InlineKeyboardButton(text="›", callback_data=f"{prefix}:{page + 1}"))
     b.row(*row)

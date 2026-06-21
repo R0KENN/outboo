@@ -13,6 +13,7 @@ from handlers import admin as admin_handler
 from handlers import autoreact as autoreact_handler
 from handlers import bot_membership as bot_membership_handler
 from handlers import broadcast as broadcast_handler
+from handlers import errors as errors_handler
 from handlers import giveaway as giveaway_handler
 from handlers import join_requests as join_requests_handler
 
@@ -26,7 +27,6 @@ from handlers import sheets as sheets_handler
 from middlewares.admin_check import AdminCheckMiddleware
 from middlewares.throttling import ThrottlingMiddleware
 from services.giveaway import restore_giveaways
-from handlers import errors as errors_handler
 
 # ── сервисы ──
 from services.scheduler import restore_jobs, setup_scheduler
@@ -54,7 +54,6 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(errors_handler.router)
-
 
     # Middleware (порядок важен: троттлинг до проверки прав)
     dp.message.middleware(ThrottlingMiddleware())
