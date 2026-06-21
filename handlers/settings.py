@@ -10,6 +10,8 @@ from aiogram import F, Router
 from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from database.crud import get_managed_chat, get_or_create_chat_settings
 from database.engine import session_factory
@@ -17,6 +19,10 @@ from keyboards.settings_kb import autoreact_kb, main_settings_kb, params_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="settings")
+
+
+class JoinWelcomeFSM(StatesGroup):
+    text = State()
 
 # Границы значений, чтобы кнопками нельзя было выставить абсурд
 LIMITS = {
@@ -62,7 +68,7 @@ async def cmd_settings(message: Message) -> None:
 
 
 @router.callback_query(F.data.startswith("set:"))
-async def on_settings_callback(callback: CallbackQuery) -> None:
+async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
     """Обрабатывает все нажатия в панели настроек."""
     parts = callback.data.split(":")
     action = parts[1]
