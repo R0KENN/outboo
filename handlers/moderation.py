@@ -78,7 +78,19 @@ async def moderate_message(
                         cfg.flood_mute_seconds,
                         "flood",
                     )
-                    await message.answer(f"{message.from_user.full_name} замучен за флуд.")
+                    import asyncio
+                    notice = await message.answer(
+                        f"{message.from_user.full_name} замучен за флуд."
+                    )
+
+                    async def _del_notice(m=notice):
+                        await asyncio.sleep(10)
+                        try:
+                            await m.delete()
+                        except Exception:
+                            pass
+
+                    asyncio.create_task(_del_notice())
                 except Exception as e:
                     logger.warning("Не удалось замутить за флуд: %s", e)
                 return

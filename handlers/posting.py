@@ -717,6 +717,50 @@ async def cmd_queue(message: Message) -> None:
     """Открывает инлайн-вкладку очереди."""
     await _render_queue(message)
 
+@router.message(Command("cancelpost"))
+async def cmd_cancelpost(message: Message) -> None:
+    """Отменяет отложенный пост по id: /cancelpost <id>."""
+    parts = (message.text or "").split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        await message.answer("Формат: /cancelpost &lt;id&gt;")
+        return
+    post_id = int(parts[1])
+    async with session_factory() as session:
+        ok = await crud.cancel_post(session, post_id)
+    try:
+        sched.scheduler.remove_job(f"post:{post_id}")
+    except Exception:
+        pass
+    await message.answer(
+        f"Пост #{post_id} отменён." if ok else "Пост не найден или уже не в очереди."
+    )
+
+
+@router.message(Command("repost"))
+async def cmd_repost(message: Message) -> None:
+    """Переносит пост на новое время: /repost <id> ДД.ММ.ГГГГ ЧЧ:ММ."""
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Формат: /repost &lt;id&gt; ДД.ММ.ГГГГ ЧЧ:ММ")
+        return
+    sub = parts[1].split(maxsplit=1)
+    if not sub[0].isdigit() or len(sub) < 2:
+        await message.answer("Формат: /repost &lt;id&gt; ДД.ММ.ГГГГ ЧЧ:ММ")
+        return
+    post_id = int(sub[0])
+    new_time = parse_publish_time(sub[1])
+    if new_time is None:
+        await message.answer("Не разобрал время или оно в прошлом.")
+        return
+    async with session_factory() as session:
+        ok = await crud.reschedule_post(session, post_id, new_time)
+    if not ok:
+        await message.answer("Пост не найден или уже не в очереди.")
+        return
+    await sched.schedule_post(post_id, new_time)
+    await message.answer(
+        f"Пост #{post_id} перенесён на {to_local_str(new_time)} (МСК)."
+    )
 
 @router.callback_query(F.data == "q:refresh")
 async def cb_queue_refresh(callback: CallbackQuery) -> None:
@@ -1015,6 +1059,46 @@ async def cb_reschedbatch_cancel(callback: CallbackQuery, state: FSMContext) -> 
     await _render_queue(callback.message, edit=True)
     await callback.answer("Перенос отменён.")
 
+@router.message(RescheduleFSM.waiting_time_batch)
+async def step_reschedbatch_time(message: Message, state: FSMContext) -> None:
+    """Принимает новую дату и переносит все посты группы на это время."""
+    new_time = parse_publish_time(message.text or "")
+    if new_time is None:
+        await message.answer(
+            "Не разобрал время или оно в прошлом.\n"
+            "Формат: <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>, например 25.12.2025 18:30."
+        )
+        return
+
+    data = await state.get_data()
+    batch_id = data.get("resched_batch_id")
+    await state.clear()
+    if not batch_id:
+        await message.answer("Не нашёл группу для переноса. Откройте /queue заново.")
+        return
+
+    async with session_factory() as session:
+        groups = await crud.list_pending_grouped(session)
+    grp = next((g for g in groups if g[0].batch_id == batch_id), None)
+    if not grp:
+        await message.answer("Группа уже не в очереди.")
+        return
+
+    moved = 0
+    async with session_factory() as session:
+        for p in grp:
+            if await crud.reschedule_post(session, p.id, new_time):
+                moved += 1
+    for p in grp:
+        await sched.schedule_post(p.id, new_time)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="📋 К очереди", callback_data="q:refresh")]]
+    )
+    await message.answer(
+        f"✅ Перенесено постов: <b>{moved}</b> на <b>{to_local_str(new_time)}</b> (МСК).",
+        reply_markup=kb,
+    )
 
 @router.message(RescheduleFSM.waiting_time_batch)
 async def step_reschedbatch_time(message: Message, state: FSMContext) -> None:

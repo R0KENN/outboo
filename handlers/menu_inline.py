@@ -61,7 +61,12 @@ def _as_user_message(callback: CallbackQuery) -> Message:
     callback.message.from_user — это бот; командам (/ref, /broadcast и т.п.)
     нужен id того, кто нажал кнопку.
     """
-    return callback.message.model_copy(update={"from_user": callback.from_user})
+    msg = callback.message.model_copy(update={"from_user": callback.from_user})
+    # Подстраховка: если подмена не сработала (изменилось поведение pydantic),
+    # явно проставляем from_user, чтобы не уйти с id бота.
+    if msg.from_user is None or msg.from_user.id != callback.from_user.id:
+        object.__setattr__(msg, "from_user", callback.from_user)
+    return msg
 
 
 # ─────────────────────────── клавиатуры ───────────────────────────

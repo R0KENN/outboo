@@ -27,6 +27,7 @@ from handlers import sheets as sheets_handler
 from middlewares.admin_check import AdminCheckMiddleware
 from middlewares.throttling import ThrottlingMiddleware
 from services.giveaway import restore_giveaways
+from sqlalchemy.exc import OperationalError
 
 # ── сервисы ──
 from services.scheduler import restore_jobs, setup_scheduler
@@ -89,8 +90,16 @@ async def main() -> None:
 
         # Планировщик отложенных постов и конкурсов
         setup_scheduler(bot)
-        await restore_jobs()  # восстановить посты из БД после рестарта
-        await restore_giveaways(bot)  # восстановить таймеры конкурсов
+        try:
+            await restore_jobs()  # восстановить посты из БД после рестарта
+            await restore_giveaways(bot)  # восстановить таймеры конкурсов
+        except OperationalError as e:
+            logger.error(
+                "Не удалось прочитать БД (%s). Похоже, таблицы не созданы. "
+                "Поставьте AUTO_INIT_DB=true или выполните 'alembic upgrade head'.",
+                e,
+            )
+            raise SystemExit(1)
 
         logger.info("Бот в режиме long polling.")
         await dp.start_polling(

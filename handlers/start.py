@@ -48,7 +48,6 @@ async def cmd_help(message: Message) -> None:
         "<b>Автопостинг (в личке с ботом):</b>\n"
         "/newpost — создать отложенный пост\n"
         "/queue — очередь запланированных постов\n"
-        "/cancelpost &lt;id&gt; — отменить пост\n"
-        "/repost &lt;id&gt; ДД.ММ.ГГГГ ЧЧ:ММ — перенести пост\n"
+        "(отмена и перенос — кнопками внутри /queue)\n"
     )
     await message.answer(text)

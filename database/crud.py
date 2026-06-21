@@ -1,5 +1,6 @@
 """Слой доступа к данным. Вся работа с БД — только здесь (раздел 3 ТЗ)."""
 
+from datetime import UTC as _UTC
 from datetime import date as _date
 from datetime import datetime
 from datetime import datetime as _dt
@@ -198,7 +199,7 @@ async def bump_stat(session: AsyncSession, chat_id: int, metric: str, amount: in
     metric: new_members | deleted_spam | deleted_profanity | bans | mutes |
             warns | messages | ...
     """
-    today = _date.today().isoformat()
+    today = _dt.now(_UTC).date().isoformat()
     stmt = select(Stat).where(Stat.chat_id == chat_id, Stat.date == today, Stat.metric == metric)
     row = (await session.execute(stmt)).scalar_one_or_none()
     if row is None:
@@ -210,7 +211,8 @@ async def bump_stat(session: AsyncSession, chat_id: int, metric: str, amount: in
 
 async def get_stats_period(session: AsyncSession, chat_id: int, days: int) -> dict[str, int]:
     """Суммирует метрики за последние N дней. Возвращает {metric: сумма}."""
-    since = (_date.today() - _timedelta(days=days - 1)).isoformat()
+    from datetime import datetime as _dt2, UTC as _UTC2
+    since = (_dt.now(_UTC).date() - _timedelta(days=days - 1)).isoformat()
     stmt = (
         select(Stat.metric, _func.sum(Stat.value))
         .where(Stat.chat_id == chat_id, Stat.date >= since)

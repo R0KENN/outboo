@@ -112,7 +112,6 @@ async def _publish_post(post_id: int) -> None:
                 text,
                 parse_mode=parse_mode,
                 reply_markup=keyboard,
-                disable_web_page_preview=False,
             )
             sent_message_ids.append(msg.message_id)
 
