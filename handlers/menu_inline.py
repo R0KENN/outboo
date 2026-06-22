@@ -187,13 +187,7 @@ async def on_chats(callback: CallbackQuery) -> None:
     async with session_factory() as session:
         all_chats = await list_managed_chats(session, only_active=True)
 
-    if _is_global_admin(user_id):
-        visible = all_chats
-    else:
-        visible = []
-        for ch in all_chats:
-            if await _is_chat_admin(callback.bot, ch.chat_id, user_id):
-                visible.append(ch)
+    visible = [ch for ch in all_chats if ch.added_by == user_id]
 
     if not visible:
         await callback.message.edit_text(
@@ -217,7 +211,11 @@ async def on_open_chat(callback: CallbackQuery) -> None:
     """Карточка конкретного чата с его индивидуальными настройками."""
     chat_id = int(callback.data.split(":")[2])
 
-    if not await _is_chat_admin(callback.bot, chat_id, callback.from_user.id):
+    user_id = callback.from_user.id
+    async with session_factory() as session:
+        _mc = await get_managed_chat(session, chat_id)
+    owns = _mc is not None and _mc.added_by == user_id
+    if not _is_global_admin(user_id) and not owns:
         await callback.answer("Нет доступа к этому чату.", show_alert=True)
         return
 

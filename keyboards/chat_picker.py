@@ -51,17 +51,9 @@ async def build_chat_picker(
             continue
         if not ch.is_admin:
             continue
-        # Права обычного пользователя
-        if not is_global_admin:
-            try:
-                m = await bot.get_chat_member(ch.chat_id, user_id)
-                if m.status not in (
-                    ChatMemberStatus.ADMINISTRATOR,
-                    ChatMemberStatus.CREATOR,
-                ):
-                    continue
-            except Exception:
-                continue
+        # Обычный пользователь видит только свои чаты (которые он добавил)
+        if ch.added_by != user_id:
+            continue
 
         title = ch.title or str(ch.chat_id)
         if multi:

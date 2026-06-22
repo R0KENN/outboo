@@ -78,10 +78,17 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
         return
 
     if action == "joinwelcometext":
+        chat_id = int(parts[-1])
+        if not await _is_admin(callback, chat_id, callback.from_user.id):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        await state.set_state(JoinWelcomeFSM.text)
+        await state.update_data(chat_id=chat_id)
         await callback.message.answer(
-            "Чтобы задать текст приветствия в ЛС, отправьте в этом канале команду:\n"
-            "<code>/setjoinwelcome ваш текст</code>\n"
-            "Доступен плейсхолдер {name}."
+            "✏️ Пришлите новый текст приветствия в ЛС.\n"
+            "Можно использовать {name} — подставится имя пользователя.\n"
+            "Форматирование (жирный, курсив, ссылки) сохранится.\n\n"
+            "Для отмены отправьте /cancel"
         )
         await callback.answer()
         return
@@ -173,6 +180,30 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
             )
             await callback.answer()
 
+@router.message(JoinWelcomeFSM.text, Command("cancel"))
+async def join_welcome_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Отменено.")
+
+
+@router.message(JoinWelcomeFSM.text)
+async def join_welcome_save(message: Message, state: FSMContext) -> None:
+    """Сохраняет текст приветствия в ЛС, введённый через кнопку."""
+    data = await state.get_data()
+    chat_id = data.get("chat_id")
+    await state.clear()
+
+    text = (message.html_text or "").strip()
+    if not text:
+        await message.answer("Пустой текст — ничего не сохранил. Попробуйте ещё раз.")
+        return
+
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, chat_id)
+        cfg.join_welcome_text = text
+        cfg.join_welcome_enabled = True
+        await session.commit()
+    await message.answer("✅ Текст приветствия в ЛС сохранён и включён.")
 
 @router.message(Command("setwelcome"))
 async def cmd_set_welcome(message: Message) -> None:
