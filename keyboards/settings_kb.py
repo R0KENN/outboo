@@ -105,6 +105,18 @@ def section_moderation_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
             callback_data=f"set:toggle:antiflood_enabled:{cid}",
         )
     )
+    b.row(
+        InlineKeyboardButton(
+            text="🚫 Стоп-слова (антимат)",
+            callback_data=f"set:words:0:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="✅ Разрешённые ссылки",
+            callback_data=f"set:domains:0:{cid}",
+        )
+    )
     _back_root_row(b, cid)
     return b.as_markup()
 
@@ -286,3 +298,87 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
 
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"set:refresh:{cid}"))
     return b.as_markup()
+
+WORDS_PER_PAGE = 8
+
+
+def _list_kb(
+    items: list[str],
+    page: int,
+    cid: int,
+    kind: str,
+    add_text: str,
+    empty_hint: str,
+) -> InlineKeyboardMarkup:
+    """Универсальный список (стоп-слова / домены) с удалением и пагинацией.
+
+    kind — 'word' или 'domain' (используется в callback_data).
+    """
+    b = InlineKeyboardBuilder()
+    total = len(items)
+    pages = max(1, (total + WORDS_PER_PAGE - 1) // WORDS_PER_PAGE)
+    page = max(0, min(page, pages - 1))
+    start = page * WORDS_PER_PAGE
+    chunk = items[start : start + WORDS_PER_PAGE]
+
+    for i, item in enumerate(chunk):
+        # idx — абсолютный индекс в полном списке (для надёжного удаления)
+        idx = start + i
+        b.row(
+            InlineKeyboardButton(
+                text=f"🗑 {item}",
+                callback_data=f"set:del{kind}:{idx}:{page}:{cid}",
+            )
+        )
+
+    # Навигация по страницам, если их больше одной
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(
+                    text="‹", callback_data=f"set:{kind}s:{page - 1}:{cid}"
+                )
+            )
+        nav.append(
+            InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="set:noop")
+        )
+        if page < pages - 1:
+            nav.append(
+                InlineKeyboardButton(
+                    text="›", callback_data=f"set:{kind}s:{page + 1}:{cid}"
+                )
+            )
+        b.row(*nav)
+
+    b.row(
+        InlineKeyboardButton(
+            text=add_text,
+            callback_data=f"set:add{kind}:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="⬅️ Назад к модерации",
+            callback_data=f"set:section:moderation:{cid}",
+        )
+    )
+    return b.as_markup()
+
+
+def words_kb(items: list[str], page: int, cid: int) -> InlineKeyboardMarkup:
+    """Список стоп-слов."""
+    return _list_kb(
+        items, page, cid, kind="word",
+        add_text="➕ Добавить слово",
+        empty_hint="Список стоп-слов пуст.",
+    )
+
+
+def domains_kb(items: list[str], page: int, cid: int) -> InlineKeyboardMarkup:
+    """Список разрешённых доменов."""
+    return _list_kb(
+        items, page, cid, kind="domain",
+        add_text="➕ Добавить ссылку/домен",
+        empty_hint="Список разрешённых ссылок пуст.",
+    )

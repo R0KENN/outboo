@@ -12,16 +12,19 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from database import crud
 
 from database.crud import get_managed_chat, get_or_create_chat_settings
 from database.engine import session_factory
 from keyboards.settings_kb import (
     autoreact_kb,
+    domains_kb,
     main_settings_kb,
     params_kb,
     section_cleanup_kb,
     section_moderation_kb,
     section_newcomers_kb,
+    words_kb,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,14 @@ class WelcomeFSM(StatesGroup):
 
 class RulesFSM(StatesGroup):
     text = State()
+
+class AddWordFSM(StatesGroup):
+    word = State()
+
+
+class AddDomainFSM(StatesGroup):
+    domain = State()
+
 
 # Границы значений, чтобы кнопками нельзя было выставить абсурд
 LIMITS = {
@@ -268,6 +279,81 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
             await callback.answer(f"Набор: {cfg.autoreact_emojis or 'пусто'}")
 
+        elif action == "words":
+            page = int(parts[2])
+            items = await crud.list_stopwords(session, chat_id)
+            text = (
+                "🚫 <b>Стоп-слова (антимат)</b>\n\n"
+                "Сообщения с этими словами удаляются, нарушителю выдаётся варн.\n"
+                "Нажмите на слово, чтобы удалить его.\n\n"
+                f"Всего слов: {len(items)}"
+            )
+            if not items:
+                text += "\n\nСписок пуст. Нажмите «Добавить слово»."
+            await callback.message.edit_text(text, reply_markup=words_kb(items, page, chat_id))
+            await callback.answer()
+
+        elif action == "domains":
+            page = int(parts[2])
+            items = await crud.list_domains(session, chat_id)
+            text = (
+                "✅ <b>Разрешённые ссылки</b>\n\n"
+                "Антиспам удаляет ссылки на все домены, кроме указанных здесь.\n"
+                "Нажмите на домен, чтобы удалить его.\n\n"
+                f"Всего доменов: {len(items)}"
+            )
+            if not items:
+                text += "\n\nСписок пуст — пока разрешённых ссылок нет."
+            await callback.message.edit_text(text, reply_markup=domains_kb(items, page, chat_id))
+            await callback.answer()
+
+        elif action == "delword":
+            idx, page = int(parts[2]), int(parts[3])
+            items = await crud.list_stopwords(session, chat_id)
+            if 0 <= idx < len(items):
+                await crud.remove_stopword(session, chat_id, items[idx])
+                items = await crud.list_stopwords(session, chat_id)
+            text = (
+                "🚫 <b>Стоп-слова (антимат)</b>\n\n"
+                "Нажмите на слово, чтобы удалить его.\n\n"
+                f"Всего слов: {len(items)}"
+            )
+            await callback.message.edit_text(text, reply_markup=words_kb(items, page, chat_id))
+            await callback.answer("Удалено.")
+
+        elif action == "deldomain":
+            idx, page = int(parts[2]), int(parts[3])
+            items = await crud.list_domains(session, chat_id)
+            if 0 <= idx < len(items):
+                await crud.remove_domain(session, chat_id, items[idx])
+                items = await crud.list_domains(session, chat_id)
+            text = (
+                "✅ <b>Разрешённые ссылки</b>\n\n"
+                "Нажмите на домен, чтобы удалить его.\n\n"
+                f"Всего доменов: {len(items)}"
+            )
+            await callback.message.edit_text(text, reply_markup=domains_kb(items, page, chat_id))
+            await callback.answer("Удалено.")
+
+        elif action == "addword":
+            await state.set_state(AddWordFSM.word)
+            await state.update_data(chat_id=chat_id)
+            await callback.message.answer(
+                "🚫 Пришлите слово (или несколько через запятую), которое нужно "
+                "запретить.\n\nДля отмены отправьте /cancel"
+            )
+            await callback.answer()
+
+        elif action == "adddomain":
+            await state.set_state(AddDomainFSM.domain)
+            await state.update_data(chat_id=chat_id)
+            await callback.message.answer(
+                "✅ Пришлите домен, который нужно разрешить, например "
+                "<code>example.com</code> (или несколько через запятую).\n\n"
+                "Для отмены отправьте /cancel"
+            )
+            await callback.answer()
+
         elif action == "section":
             section = parts[2]
             kb_func = SECTION_KB.get(section)
@@ -417,3 +503,62 @@ async def cmd_set_rules(message: Message) -> None:
         cfg.rules_text = text
         await session.commit()
     await message.answer("Правила обновлены.")
+
+@router.message(AddWordFSM.word, Command("cancel"))
+async def addword_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Отменено.")
+
+
+@router.message(AddWordFSM.word)
+async def addword_save(message: Message, state: FSMContext) -> None:
+    """Сохраняет стоп-слово(а), введённые через кнопку."""
+    data = await state.get_data()
+    chat_id = data.get("chat_id")
+    await state.clear()
+
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто — ничего не добавил.")
+        return
+
+    words = [w.strip() for w in raw.split(",") if w.strip()]
+    added = 0
+    async with session_factory() as session:
+        for w in words:
+            if await crud.add_stopword(session, chat_id, w):
+                added += 1
+    await message.answer(
+        f"✅ Добавлено слов: {added} (из {len(words)}).\n"
+        "Откройте список в настройках, чтобы проверить."
+    )
+
+
+@router.message(AddDomainFSM.domain, Command("cancel"))
+async def adddomain_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Отменено.")
+
+
+@router.message(AddDomainFSM.domain)
+async def adddomain_save(message: Message, state: FSMContext) -> None:
+    """Сохраняет домен(ы), введённые через кнопку."""
+    data = await state.get_data()
+    chat_id = data.get("chat_id")
+    await state.clear()
+
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто — ничего не добавил.")
+        return
+
+    domains = [d.strip() for d in raw.split(",") if d.strip()]
+    added = 0
+    async with session_factory() as session:
+        for d in domains:
+            if await crud.add_domain(session, chat_id, d):
+                added += 1
+    await message.answer(
+        f"✅ Добавлено доменов: {added} (из {len(domains)}).\n"
+        "Откройте список в настройках, чтобы проверить."
+    )
