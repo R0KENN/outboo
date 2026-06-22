@@ -392,12 +392,27 @@ async def upsert_subscriber(
         sub.is_active = True
     await session.commit()
 
+async def set_subscriber_source(session, user_id: int, source_chat_id: int) -> None:
+    """Запоминает, через какой канал подписчик пришёл к боту (если ещё не задано)."""
+    sub = await session.get(Subscriber, user_id)
+    if sub and sub.source_chat_id is None:
+        sub.source_chat_id = source_chat_id
+        await session.commit()
 
 async def get_active_subscriber_ids(session: AsyncSession) -> list[int]:
     """Список id всех активных подписчиков (для рассылки)."""
     stmt = select(Subscriber.user_id).where(Subscriber.is_active.is_(True))
     return list((await session.execute(stmt)).scalars().all())
 
+async def get_active_subscriber_ids_by_source(session, source_chat_id: int) -> list[int]:
+    """ID активных подписчиков, пришедших через конкретный канал."""
+    res = await session.execute(
+        select(Subscriber.user_id).where(
+            Subscriber.is_active.is_(True),
+            Subscriber.source_chat_id == source_chat_id,
+        )
+    )
+    return [row[0] for row in res.all()]
 
 async def deactivate_subscriber(session: AsyncSession, user_id: int) -> None:
     """Помечает подписчика неактивным (заблокировал бота)."""

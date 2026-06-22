@@ -174,7 +174,7 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(
-            text=("🎲 Режим: случайная" if cfg.autoreact_random else "📚 Режим: все сразу"),
+            text=("🎲 Режим: случайная" if cfg.autoreact_random else "📌 Режим: первая из набора"),
             callback_data=f"set:reactmode:{cid}",
         )
     )
@@ -182,6 +182,12 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text=f"{_mark(cfg.autoreact_join_custom)} Подхватывать кастом-эмодзи",
             callback_data=f"set:toggle:autoreact_join_custom:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"⏱ Задержка реакции: {getattr(cfg, 'autoreact_delay', 0)} сек",
+            callback_data=f"set:reactdelay:{cid}",
         )
     )
 

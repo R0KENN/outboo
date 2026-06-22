@@ -30,14 +30,22 @@ async def run_broadcast(
     bot: Bot,
     from_chat_id: int,
     message_id: int,
+    source_chat_id: int | None = None,
 ) -> dict[str, int]:
-    """Копирует сообщение message_id из чата from_chat_id всем активным подписчикам.
+    """Копирует сообщение message_id из чата from_chat_id подписчикам.
 
+    Если source_chat_id задан — рассылка только тем, кто пришёл к боту через
+    этот канал (deep-link ?start=src_<id>); иначе — всем активным подписчикам.
     Возвращает сводку: {"total", "sent", "blocked", "failed"}.
     copy_message публикует контент без пометки «переслано».
     """
     async with session_factory() as session:
-        user_ids = await crud.get_active_subscriber_ids(session)
+        if source_chat_id is None:
+            user_ids = await crud.get_active_subscriber_ids(session)
+        else:
+            user_ids = await crud.get_active_subscriber_ids_by_source(
+                session, source_chat_id
+            )
 
     total = len(user_ids)
     sent = blocked = failed = 0

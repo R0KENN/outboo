@@ -64,6 +64,9 @@ class ChatSettings(Base):
     autoreact_emojis: Mapped[str] = mapped_column(String(255), default="👍")
     # Ставить все эмодзи сразу (True) или один случайный из набора (False)
     autoreact_random: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Задержка перед простановкой реакции на новый пост, секунды (0 = сразу).
+    # Помогает «подхватить» кастом-реакцию, если её успеет поставить читатель.
+    autoreact_delay: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     # Тексты
     welcome_text: Mapped[str] = mapped_column(Text, default="Добро пожаловать, {name}!")
@@ -222,6 +225,11 @@ class Subscriber(Base):
     username: Mapped[str] = mapped_column(String(64), default="")
     full_name: Mapped[str] = mapped_column(String(255), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+        # Через какой канал/чат пользователь пришёл к боту (deep-link ?start=src_<id>).
+    # NULL — источник неизвестен (запустил бота напрямую).
+    source_chat_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None, index=True
+    )
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

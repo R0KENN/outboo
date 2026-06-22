@@ -20,6 +20,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import settings
 from database import crud
@@ -34,6 +35,7 @@ class Broadcast(StatesGroup):
     """Шаги диалога рассылки."""
 
     content = State()
+    segment = State()
     confirm = State()
 
 
@@ -90,8 +92,48 @@ async def step_content(message: Message, state: FSMContext) -> None:
         from_chat_id=message.chat.id,
         message_id=message.message_id,
     )
+    # Список каналов, через которые приходили подписчики — для сегментации
     async with session_factory() as session:
-        _, active = await crud.count_subscribers(session)
+        from database.crud import list_managed_chats
+
+        chats = await list_managed_chats(session, only_active=True)
+
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="📢 Всем подписчикам", callback_data="bc:seg:all"))
+    for ch in chats:
+        if ch.chat_type != "channel":
+            continue
+        title = ch.title or str(ch.chat_id)
+        b.row(InlineKeyboardButton(text=f"📢 {title}", callback_data=f"bc:seg:{ch.chat_id}"))
+    b.row(InlineKeyboardButton(text="❌ Отмена", callback_data="bc:cancel"))
+
+    await state.set_state(Broadcast.segment)
+    await message.answer(
+        "Кому разослать?\n«Всем» — всем активным подписчикам бота.\n"
+        "Канал — только тем, кто пришёл к боту через этот канал.",
+        reply_markup=b.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "bc:cancel")
+async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text("Рассылка отменена.")
+    await callback.answer()
+
+@router.callback_query(Broadcast.segment, F.data.startswith("bc:seg:"))
+async def cb_segment(callback: CallbackQuery, state: FSMContext) -> None:
+    """Выбор сегмента получателей: все или конкретный канал."""
+    raw = callback.data.split(":")[2]
+    source_chat_id = None if raw == "all" else int(raw)
+    await state.update_data(source_chat_id=source_chat_id)
+
+    async with session_factory() as session:
+        if source_chat_id is None:
+            _, active = await crud.count_subscribers(session)
+        else:
+            ids = await crud.get_active_subscriber_ids_by_source(session, source_chat_id)
+            active = len(ids)
 
     await state.set_state(Broadcast.confirm)
     kb = InlineKeyboardMarkup(
@@ -102,18 +144,12 @@ async def step_content(message: Message, state: FSMContext) -> None:
             ]
         ]
     )
-    await message.answer(
-        f"Сообщение принято. Получателей: <b>{active}</b>.\nЗапустить рассылку?",
+    seg_name = "всем подписчикам" if source_chat_id is None else "сегменту канала"
+    await callback.message.edit_text(
+        f"Рассылка {seg_name}. Получателей: <b>{active}</b>.\nЗапустить?",
         reply_markup=kb,
     )
-
-
-@router.callback_query(F.data == "bc:cancel")
-async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.clear()
-    await callback.message.edit_text("Рассылка отменена.")
     await callback.answer()
-
 
 @router.callback_query(F.data == "bc:go")
 async def cb_go(callback: CallbackQuery, state: FSMContext) -> None:
@@ -123,6 +159,7 @@ async def cb_go(callback: CallbackQuery, state: FSMContext) -> None:
 
     from_chat_id = data.get("from_chat_id")
     message_id = data.get("message_id")
+    source_chat_id = data.get("source_chat_id")
     if not from_chat_id or not message_id:
         await callback.message.edit_text("Не нашёл сообщение для рассылки, начните заново.")
         await callback.answer()
@@ -136,7 +173,9 @@ async def cb_go(callback: CallbackQuery, state: FSMContext) -> None:
 
     async def _worker():
         try:
-            summary = await bc.run_broadcast(bot, from_chat_id, message_id)
+            summary = await bc.run_broadcast(
+                bot, from_chat_id, message_id, source_chat_id=source_chat_id
+            )
             await bot.send_message(
                 owner_id,
                 "✅ <b>Рассылка завершена</b>\n"

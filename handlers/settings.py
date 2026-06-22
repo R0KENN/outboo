@@ -113,7 +113,13 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
             setattr(cfg, field, not getattr(cfg, field))
             await session.commit()
             await session.refresh(cfg)
-            await callback.message.edit_reply_markup(reply_markup=main_settings_kb(cfg, chat_type))
+            # Реакционные тумблеры остаются в подменю автореакций
+            if field in ("autoreact_enabled", "autoreact_join_custom"):
+                await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
+            else:
+                await callback.message.edit_reply_markup(
+                    reply_markup=main_settings_kb(cfg, chat_type)
+                )
             await callback.answer("Сохранено.")
 
         elif action in ("inc", "dec"):
@@ -152,8 +158,20 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
             await session.refresh(cfg)
             await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
             await callback.answer(
-                "Случайная реакция" if cfg.autoreact_random else "Все реакции сразу"
+                "Случайная из набора" if cfg.autoreact_random else "Первая из набора"
             )
+
+        elif action == "reactdelay":
+            steps = [0, 5, 15, 30, 60, 120, 300]
+            try:
+                idx = steps.index(cfg.autoreact_delay)
+            except ValueError:
+                idx = 0
+            cfg.autoreact_delay = steps[(idx + 1) % len(steps)]
+            await session.commit()
+            await session.refresh(cfg)
+            await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
+            await callback.answer(f"Задержка: {cfg.autoreact_delay} сек")
 
         elif action == "reactemoji":
             # Мультивыбор эмодзи: добавляем/убираем из набора

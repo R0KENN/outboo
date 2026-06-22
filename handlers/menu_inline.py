@@ -31,6 +31,17 @@ from keyboards.settings_kb import main_settings_kb
 logger = logging.getLogger(__name__)
 router = Router(name="menu_inline")
 
+_bot_username: str | None = None
+
+
+async def _get_bot_username(bot) -> str:
+    """Username бота для deep-link, кэшируется после первого запроса."""
+    global _bot_username
+    if _bot_username is None:
+        me = await bot.get_me()
+        _bot_username = me.username or ""
+    return _bot_username
+
 
 # ─────────────────────────── вспомогательные ───────────────────────────
 def _is_global_admin(user_id: int) -> bool:
@@ -130,6 +141,10 @@ async def cmd_start(message: Message) -> None:
                 message.from_user.username or "",
                 message.from_user.full_name or "",
             )
+            if payload.startswith("src_"):
+                raw = payload[4:]
+                if raw.lstrip("-").isdigit():
+                    await crud.set_subscriber_source(session, user_id, int(raw))
             if payload.startswith("ref_"):
                 raw = payload[4:]
                 if raw.isdigit():
@@ -228,9 +243,58 @@ async def on_open_chat(callback: CallbackQuery) -> None:
     icon = _chat_icon(chat_type)
     kind = "канала" if chat_type == "channel" else "чата"
 
+    kb = main_settings_kb(cfg, chat_type)
+    # Для каналов добавляем кнопку с реферальной ссылкой набора подписчиков
+    if chat_type == "channel":
+        b = InlineKeyboardBuilder.from_markup(kb)
+        b.row(
+            InlineKeyboardButton(
+                text="🔗 Ссылка для набора подписчиков",
+                callback_data=f"menu:reflink:{chat_id}",
+            )
+        )
+        kb = b.as_markup()
+
     await callback.message.edit_text(
         f"{icon} <b>{title}</b>\nИндивидуальные настройки {kind}:",
-        reply_markup=main_settings_kb(cfg, chat_type),
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("menu:reflink:"))
+async def on_reflink(callback: CallbackQuery) -> None:
+    """Показывает deep-link для набора подписчиков через конкретный канал."""
+    chat_id = int(callback.data.split(":")[2])
+
+    # Доступ — владелец бота или тот, кто добавил этот чат
+    user_id = callback.from_user.id
+    async with session_factory() as session:
+        ch = await get_managed_chat(session, chat_id)
+    owns = ch is not None and ch.added_by == user_id
+    if not _is_global_admin(user_id) and not owns:
+        await callback.answer("Нет доступа к этому чату.", show_alert=True)
+        return
+
+    username = await _get_bot_username(callback.bot)
+    if not username:
+        await callback.answer("Не удалось получить имя бота.", show_alert=True)
+        return
+
+    link = f"https://t.me/{username}?start=src_{chat_id}"
+    title = ch.title if ch else str(chat_id)
+
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"menu:open:{chat_id}"))
+
+    await callback.message.edit_text(
+        f"🔗 <b>Ссылка для набора подписчиков</b>\n"
+        f"Канал: <b>{title}</b>\n\n"
+        f"Раздавайте эту ссылку. Каждый, кто перейдёт по ней и запустит бота, "
+        f"будет помечен как пришедший через этот канал — и попадёт в его сегмент "
+        f"при рассылке.\n\n"
+        f"<code>{link}</code>\n\n"
+        f"<i>Нажмите на ссылку, чтобы скопировать.</i>",
+        reply_markup=b.as_markup(),
     )
     await callback.answer()
 
