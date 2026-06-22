@@ -172,6 +172,11 @@ async def check_profanity(
         if not word:
             continue
         pattern = r"(?<!\w)" + re.escape(word) + r"(?!\w)"
-        if re.search(pattern, lowered) or re.search(pattern, normalized):
+        # Короткие слова (≤4 символов) проверяем только по исходному тексту:
+        # агрессивная нормализация (leet, склейка) на них даёт много ложных
+        # срабатываний. Длинные слова проверяем и по нормализованной форме.
+        if re.search(pattern, lowered):
+            return True
+        if len(word) > 4 and re.search(pattern, normalized):
             return True
     return False

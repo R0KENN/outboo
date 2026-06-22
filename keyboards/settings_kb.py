@@ -139,7 +139,7 @@ def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text=f"за {cfg.flood_seconds} сек.", callback_data="set:noop"),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:flood_seconds:{cid}"),
     )
-        # Срок мута за флуд / по лимиту варнов (в минутах на кнопке)
+    # Срок мута за флуд / по лимиту варнов (в минутах на кнопке)
     b.row(
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:flood_mute_seconds:{cid}"),
         InlineKeyboardButton(

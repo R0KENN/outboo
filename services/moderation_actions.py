@@ -105,18 +105,11 @@ async def mute_user(
     """Временно лишает участника права писать.
 
     Telegram считает ограничение «навсегда», если оно короче 30 секунд,
-    поэтому поднимаем нижнюю границу до 31 секунды.
+    поэтому поднимаем нижнюю границу до 31 секунды. Гасим все права на отправку,
+    иначе замученный мог бы слать медиа/стикеры/опросы.
     """
     seconds = max(31, seconds)
     until = datetime.now(UTC) + timedelta(seconds=seconds)
-    await bot.restrict_chat_member(
-        chat_id,
-        user_id,
-        permissions=ChatPermissions(can_send_messages=False),
-        until_date=until,
-    )
-    await log_action(session, chat_id, "mute", actor_id, user_id, reason)
-
     await bot.restrict_chat_member(
         chat_id,
         user_id,
@@ -135,6 +128,7 @@ async def mute_user(
         use_independent_chat_permissions=True,
         until_date=until,
     )
+    await log_action(session, chat_id, "mute", actor_id, user_id, reason)
 
 
 async def add_warn(

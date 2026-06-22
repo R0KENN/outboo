@@ -7,7 +7,7 @@ from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatMemberStatus
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from config import settings
 from database.crud import get_moderator
@@ -36,23 +36,32 @@ class AdminCheckMiddleware(BaseMiddleware):
 
     async def __call__(
         self,
-        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
-        event: Message,
+        handler: Callable[[Any, dict[str, Any]], Awaitable[Any]],
+        event: Any,
         data: dict[str, Any],
     ) -> Any:
+        # У Message данные о чате лежат прямо в event,
+        # у CallbackQuery — внутри event.message.
+        if isinstance(event, CallbackQuery):
+            from_user = event.from_user
+            chat = event.message.chat if event.message else None
+        else:
+            from_user = getattr(event, "from_user", None)
+            chat = getattr(event, "chat", None)
+
         is_admin = False
         is_moderator = False
 
-        if event.from_user and event.from_user.id in settings.admin_ids:
+        if from_user and from_user.id in settings.admin_ids:
             # Владельцы бота — администраторы в любом контексте, включая личку
             is_admin = True
-        elif event.chat and event.from_user and event.chat.type != "private":
-            cached = _cached_admin(event.chat.id, event.from_user.id)
+        elif chat and from_user and chat.type != "private":
+            cached = _cached_admin(chat.id, from_user.id)
             if cached is not None:
                 is_admin = cached
             else:
                 try:
-                    member = await event.bot.get_chat_member(event.chat.id, event.from_user.id)
+                    member = await event.bot.get_chat_member(chat.id, from_user.id)
                     is_admin = member.status in (
                         ChatMemberStatus.ADMINISTRATOR,
                         ChatMemberStatus.CREATOR,
@@ -60,16 +69,16 @@ class AdminCheckMiddleware(BaseMiddleware):
                 except Exception as e:
                     logger.warning(
                         "Не удалось получить статус %s в чате %s: %s",
-                        event.from_user.id,
-                        event.chat.id,
+                        from_user.id,
+                        chat.id,
                         e,
                     )
                     is_admin = False
-                _store_admin(event.chat.id, event.from_user.id, is_admin)
+                _store_admin(chat.id, from_user.id, is_admin)
 
             if not is_admin:
                 async with session_factory() as session:
-                    mod = await get_moderator(session, event.chat.id, event.from_user.id)
+                    mod = await get_moderator(session, chat.id, from_user.id)
                     is_moderator = mod is not None
                     if mod is not None:
                         data["mod_permissions"] = set(
