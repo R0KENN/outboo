@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    bot_token: str = Field(alias="BOT_TOKEN")
+    bot_token: str = Field(default="", alias="BOT_TOKEN")
 
     db_driver: str = Field(default="sqlite", alias="DB_DRIVER")
     sqlite_path: str = Field(default="bot.db", alias="SQLITE_PATH")
@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     @field_validator("bot_token")
     @classmethod
     def _check_token(cls, v: str) -> str:
+        if not v:
+            return v
         if ":" not in v or not v.split(":", 1)[0].isdigit():
             raise ValueError(
                 "BOT_TOKEN имеет неверный формат (ожидается вид '123456789:ABC-DEF...')."

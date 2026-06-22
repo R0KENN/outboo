@@ -187,6 +187,61 @@ async def _react_range(
         f"Поставлено: <b>{ok}</b>\n"
         f"Пропущено (нет поста / нельзя реагировать): <b>{fail}</b>"
     )
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+@router.message(Command("clearreactions"))
+async def cmd_clear_reactions(message: Message, command: CommandObject):
+    """/clearreactions <from> <to> — снять реакции бота с диапазона постов."""
+    if not await _is_channel_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.answer("Только администратор может снимать реакции.")
+        return
+    args = (command.args or "").split()
+    if len(args) != 2 or not all(a.lstrip("-").isdigit() for a in args):
+        await message.answer("Использование: /clearreactions <id_от> <id_до>")
+        return
+    start, end = int(args[0]), int(args[1])
+    if start > end:
+        start, end = end, start
+    if end - start > 500:
+        await message.answer("Диапазон слишком большой (максимум 500).")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✅ Да, снять",
+            callback_data=f"clrreact:ok:{message.chat.id}:{start}:{end}",
+        ),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="clrreact:no"),
+    ]])
+    await message.answer(
+        f"Снять реакции бота с постов {start}–{end} ({end - start + 1} шт.)?",
+        reply_markup=kb,
+    )
+
+
+@router.callback_query(F.data == "clrreact:no")
+async def cb_clear_cancel(callback):
+    await callback.message.edit_text("Отменено.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("clrreact:ok:"))
+async def cb_clear_confirm(callback):
+    _, _, cid, start, end = callback.data.split(":")
+    chat_id, start, end = int(cid), int(start), int(end)
+    if not await _is_channel_admin(callback.bot, chat_id, callback.from_user.id):
+        await callback.answer("Нет прав.", show_alert=True)
+        return
+    await callback.message.edit_text("Снимаю реакции…")
+    ok = fail = 0
+    for mid in range(start, end + 1):
+        try:
+            await callback.bot.set_message_reaction(chat_id=chat_id, message_id=mid, reaction=[])
+            ok += 1
+        except Exception:
+            fail += 1
+        await asyncio.sleep(0.1)  # анти-флуд
+    await callback.message.edit_text(f"Готово. Снято: {ok}, пропущено: {fail}.")
+    await callback.answer()
 
 @router.message(Command("reactrange"))
 async def cmd_reactrange(message: Message, bot: Bot) -> None:
