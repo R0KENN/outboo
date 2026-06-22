@@ -79,7 +79,7 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
     """Отменяет любой активный диалог рассылки."""
     if await state.get_state() is not None:
         await state.clear()
-        await message.answer("Рассылка отменена.")
+        await message.answer("Текущее действие отменено.")
 
 
 @router.message(Broadcast.content)

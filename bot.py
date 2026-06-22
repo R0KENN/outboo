@@ -16,6 +16,7 @@ from handlers import broadcast as broadcast_handler
 from handlers import errors as errors_handler
 from handlers import giveaway as giveaway_handler
 from handlers import join_requests as join_requests_handler
+from handlers import referral as referral_handler
 
 # ── новые модули ──
 from handlers import menu_inline as menu_inline_handler
@@ -76,6 +77,7 @@ async def main() -> None:
     dp.include_router(giveaway_handler.router)  # конкурсы (FSM + callback)
     dp.include_router(sheets_handler.router)  # экспорт в Google Sheets
     dp.include_router(posting.router)  # автопостинг (FSM, очередь)
+    dp.include_router(referral_handler.router)  # реферальная программа (/ref, /reftop)
 
     # Модули внутри групп
     dp.include_router(admin_handler.router)  # роли, словари, лог

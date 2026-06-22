@@ -552,10 +552,7 @@ async def _finalize_posts(message: Message, state: FSMContext, delete_after: int
 async def cb_no_delete(callback: CallbackQuery, state: FSMContext) -> None:
     """Без автоудаления — показываем предпросмотр."""
     await state.update_data(delete_after=0)
-    await _show_preview_step(
-        callback.message.model_copy(update={"from_user": callback.from_user}),
-        state,
-    )
+    await _show_preview_step(_as_user_message(callback, callback.message), state)
     await callback.answer()
 
 
@@ -614,7 +611,7 @@ async def cb_confirm_post(callback: CallbackQuery, state: FSMContext) -> None:
     """Подтверждение — создаём посты."""
     data = await state.get_data()
     await _finalize_posts(
-        callback.message.model_copy(update={"from_user": callback.from_user}),
+        _as_user_message(callback, callback.message),
         state,
         delete_after=data.get("delete_after", 0),
     )

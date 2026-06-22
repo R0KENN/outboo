@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         return {
             int(x)
             for x in self.bot_admins.replace(" ", "").split(",")
-            if x.strip().lstrip("-").isdigit()
+            if x.strip().isdigit()
         }
 
     @property

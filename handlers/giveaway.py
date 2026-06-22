@@ -209,8 +209,7 @@ async def step_when(message: Message, state: FSMContext) -> None:
         reply_markup=kb,
     )
 
-
-async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot) -> None:
+async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot, created_by: int) -> None:
     """Создаёт конкурс в БД и публикует пост. message — для ответа пользователю."""
     from datetime import datetime
 
@@ -225,7 +224,7 @@ async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot) -> 
             require_channel_id=data.get("require_channel_id", 0),
             require_channel_title=data.get("require_channel_title", ""),
             finish_at=finish_at,
-            created_by=message.from_user.id,
+            created_by=created_by
         )
 
     cond = ""
@@ -259,10 +258,11 @@ async def cb_post_channel(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await callback.message.edit_text("Публикую конкурс…")
     await _finalize_giveaway(
-        callback.message.model_copy(update={"from_user": callback.from_user}),
+        callback.message,
         state,
         chat,
         callback.bot,
+        created_by=callback.from_user.id,
     )
     await callback.answer()
 
@@ -280,6 +280,9 @@ async def cb_post_manual(callback: CallbackQuery, state: FSMContext) -> None:
 async def step_post_channel(message: Message, state: FSMContext) -> None:
     """Ручной ввод канала публикации."""
     raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пришлите @username или id канала.")
+        return
     target = raw if raw.startswith("@") else (int(raw) if raw.lstrip("-").isdigit() else "@" + raw)
     try:
         chat = await message.bot.get_chat(target)
@@ -291,7 +294,7 @@ async def step_post_channel(message: Message, state: FSMContext) -> None:
         logger.warning("Канал публикации не найден: %s", e)
         await message.answer("Не нашёл канал. Проверьте данные и права бота.")
         return
-    await _finalize_giveaway(message, state, chat, message.bot)
+    await _finalize_giveaway(message, state, chat, message.bot, created_by=message.from_user.id)
 
 
 @router.message(Command("endgiveaway"))
