@@ -60,6 +60,7 @@ async def main() -> None:
     # Middleware (порядок важен: троттлинг до проверки прав)
     dp.message.middleware(ThrottlingMiddleware())
     dp.message.middleware(AdminCheckMiddleware())
+    dp.callback_query.middleware(AdminCheckMiddleware())
 
     # ── Роутеры (порядок важен) ──
     # Инлайн-меню и события статуса бота — раньше «ловящих всё» роутеров.

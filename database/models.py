@@ -225,7 +225,7 @@ class Subscriber(Base):
     username: Mapped[str] = mapped_column(String(64), default="")
     full_name: Mapped[str] = mapped_column(String(255), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-        # Через какой канал/чат пользователь пришёл к боту (deep-link ?start=src_<id>).
+    # Через какой канал/чат пользователь пришёл к боту (deep-link ?start=src_<id>).
     # NULL — источник неизвестен (запустил бота напрямую).
     source_chat_id: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True, default=None, index=True

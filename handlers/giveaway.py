@@ -24,6 +24,7 @@ from database.engine import session_factory
 from keyboards.chat_picker import build_chat_picker
 from services import giveaway as gv
 from utils.datetime_parse import parse_publish_time, to_local_str
+from config import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="giveaway")
@@ -296,10 +297,11 @@ async def step_post_channel(message: Message, state: FSMContext) -> None:
         return
     await _finalize_giveaway(message, state, chat, message.bot, created_by=message.from_user.id)
 
-
 @router.message(Command("endgiveaway"))
 async def cmd_endgiveaway(message: Message) -> None:
     """Досрочное завершение конкурса по id."""
+    if message.chat.type != "private" or message.from_user.id not in settings.admin_ids:
+        return
     parts = (message.text or "").split()
     if len(parts) < 2 or not parts[1].isdigit():
         await message.answer("Формат: /endgiveaway <id>")

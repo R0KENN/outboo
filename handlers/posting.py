@@ -735,6 +735,13 @@ async def cmd_cancelpost(message: Message) -> None:
         return
     post_id = int(parts[1])
     async with session_factory() as session:
+        post = await crud.get_post(session, post_id)
+        if post is None or (
+            post.created_by != message.from_user.id
+            and message.from_user.id not in app_settings.admin_ids
+        ):
+            await message.answer("Пост не найден или он не ваш.")
+            return
         ok = await crud.cancel_post(session, post_id)
     try:
         sched.scheduler.remove_job(f"post:{post_id}")
