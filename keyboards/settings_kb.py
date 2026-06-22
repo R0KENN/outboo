@@ -6,9 +6,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.models import ChatSettings
 
 
-def _mark(enabled: bool) -> str:
-    """Галочка или крестик в зависимости от состояния флага."""
-    return "✅" if enabled else "❌"
+def _toggle(enabled: bool) -> str:
+    """Индикатор состояния тумблера: зелёный/серый кружок."""
+    return "🟢" if enabled else "⚪️"
 
 
 def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeyboardMarkup:
@@ -20,25 +20,25 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
         # ── Настройки КАНАЛА ──
         b.row(
             InlineKeyboardButton(
-                text=f"{_mark(cfg.autoreact_enabled)} Автореакции на посты",
+                text=f"{_toggle(cfg.autoreact_enabled)} Автореакции на посты",
                 callback_data=f"set:react:{cid}",
             )
         )
         b.row(
             InlineKeyboardButton(
-                text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
+                text=f"{_toggle(cfg.autoapprove_enabled)} Автоприём заявок",
                 callback_data=f"set:toggle:autoapprove_enabled:{cid}",
             )
         )
         b.row(
             InlineKeyboardButton(
-                text=f"{_mark(cfg.join_welcome_enabled)} Приветствие в ЛС при заявке",
+                text=f"{_toggle(cfg.join_welcome_enabled)} Приветствие в ЛС при заявке",
                 callback_data=f"set:toggle:join_welcome_enabled:{cid}",
             )
         )
         b.row(
             InlineKeyboardButton(
-                text="✏️ Текст приветствия в ЛС",
+                text="✏️ Изменить текст приветствия",
                 callback_data=f"set:joinwelcometext:{cid}",
             )
         )
@@ -64,17 +64,18 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
         )
         b.row(
             InlineKeyboardButton(
-                text=f"⚙️ Числовые параметры (порог варнов: {cfg.warn_limit})",
+                text=f"⚙️ Параметры · порог варнов {cfg.warn_limit}",
                 callback_data=f"set:params:{cid}",
             )
         )
 
-    b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
+    b.row(InlineKeyboardButton(text="🏠 В главное меню", callback_data="menu:home"))
     return b.as_markup()
+
 
 def _back_root_row(b: InlineKeyboardBuilder, cid: int) -> None:
     """Общая строка «Назад» к корню настроек группы."""
-    b.row(InlineKeyboardButton(text="⬅️ Назад к разделам", callback_data=f"set:refresh:{cid}"))
+    b.row(InlineKeyboardButton(text="‹ Назад к разделам", callback_data=f"set:refresh:{cid}"))
 
 
 def section_moderation_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
@@ -83,39 +84,37 @@ def section_moderation_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.antispam_enabled)} Антиспам (ссылки, пересылы)",
+            text=f"{_toggle(cfg.antispam_enabled)} Антиспам · ссылки и пересылы",
             callback_data=f"set:toggle:antispam_enabled:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text=f"@-упоминания: {'блок' if cfg.block_mentions else 'разрешены'}",
+            text=f"{_toggle(cfg.block_mentions)} Блокировать @-упоминания",
             callback_data=f"set:toggle:block_mentions:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.antimat_enabled)} Антимат (удаляет + варн)",
+            text=f"{_toggle(cfg.antimat_enabled)} Антимат · удаление + варн",
             callback_data=f"set:toggle:antimat_enabled:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.antiflood_enabled)} Антифлуд (мут за частые сообщения)",
+            text=f"{_toggle(cfg.antiflood_enabled)} Антифлуд · мут за частые сообщения",
             callback_data=f"set:toggle:antiflood_enabled:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text="🚫 Стоп-слова (антимат)",
+            text="🚫 Стоп-слова",
             callback_data=f"set:words:0:{cid}",
-        )
-    )
-    b.row(
+        ),
         InlineKeyboardButton(
-            text="✅ Разрешённые ссылки",
+            text="🔗 Разрешённые ссылки",
             callback_data=f"set:domains:0:{cid}",
-        )
+        ),
     )
     _back_root_row(b, cid)
     return b.as_markup()
@@ -127,33 +126,31 @@ def section_newcomers_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.captcha_enabled)} Капча для новичков",
+            text=f"{_toggle(cfg.captcha_enabled)} Капча для новичков",
             callback_data=f"set:toggle:captcha_enabled:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.welcome_enabled)} Приветствие",
+            text=f"{_toggle(cfg.welcome_enabled)} Приветствие",
             callback_data=f"set:toggle:welcome_enabled:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_toggle(cfg.quarantine_enabled)} Карантин новичков",
+            callback_data=f"set:toggle:quarantine_enabled:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
             text="✏️ Текст приветствия",
             callback_data=f"set:welcometext:{cid}",
-        )
-    )
-    b.row(
+        ),
         InlineKeyboardButton(
             text="📜 Правила чата",
             callback_data=f"set:rulestext:{cid}",
-        )
-    )
-    b.row(
-        InlineKeyboardButton(
-            text=f"{_mark(cfg.quarantine_enabled)} Карантин новичков",
-            callback_data=f"set:toggle:quarantine_enabled:{cid}",
-        )
+        ),
     )
     _back_root_row(b, cid)
     return b.as_markup()
@@ -165,18 +162,19 @@ def section_cleanup_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.clean_service_msgs)} Чистить служебные сообщения",
+            text=f"{_toggle(cfg.clean_service_msgs)} Чистить служебные сообщения",
             callback_data=f"set:toggle:clean_service_msgs:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
+            text=f"{_toggle(cfg.autoapprove_enabled)} Автоприём заявок",
             callback_data=f"set:toggle:autoapprove_enabled:{cid}",
         )
     )
     _back_root_row(b, cid)
     return b.as_markup()
+
 
 def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     """Меню числовых параметров с кнопками +/-."""
@@ -186,33 +184,33 @@ def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     # Порог варнов
     b.row(
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:warn_limit:{cid}"),
-        InlineKeyboardButton(text=f"Порог варнов: {cfg.warn_limit}", callback_data="set:noop"),
+        InlineKeyboardButton(text=f"⚠️ Порог варнов · {cfg.warn_limit}", callback_data="set:noop"),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:warn_limit:{cid}"),
     )
     # Действие при достижении порога
     b.row(
         InlineKeyboardButton(
-            text=f"При лимите варнов: {'бан' if cfg.warn_action == 'ban' else 'мут'}",
+            text=f"🎯 При лимите: {'🔨 бан' if cfg.warn_action == 'ban' else '🔇 мут'}",
             callback_data=f"set:warnaction:{cid}",
         )
     )
     # Лимит антифлуда: сообщений
     b.row(
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:flood_messages:{cid}"),
-        InlineKeyboardButton(text=f"Флуд: {cfg.flood_messages} сообщ.", callback_data="set:noop"),
+        InlineKeyboardButton(text=f"💬 Флуд · {cfg.flood_messages} сообщ.", callback_data="set:noop"),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:flood_messages:{cid}"),
     )
     # Лимит антифлуда: окно в секундах
     b.row(
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:flood_seconds:{cid}"),
-        InlineKeyboardButton(text=f"за {cfg.flood_seconds} сек.", callback_data="set:noop"),
+        InlineKeyboardButton(text=f"⏱ За {cfg.flood_seconds} сек.", callback_data="set:noop"),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:flood_seconds:{cid}"),
     )
     # Срок мута за флуд / по лимиту варнов (в минутах на кнопке)
     b.row(
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:flood_mute_seconds:{cid}"),
         InlineKeyboardButton(
-            text=f"Мут за нарушение: {cfg.flood_mute_seconds // 60} мин.",
+            text=f"🔇 Мут · {cfg.flood_mute_seconds // 60} мин.",
             callback_data="set:noop",
         ),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:flood_mute_seconds:{cid}"),
@@ -220,17 +218,17 @@ def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     # Таймаут капчи
     b.row(
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:captcha_timeout:{cid}"),
-        InlineKeyboardButton(text=f"Капча: {cfg.captcha_timeout} сек.", callback_data="set:noop"),
+        InlineKeyboardButton(text=f"🤖 Капча · {cfg.captcha_timeout} сек.", callback_data="set:noop"),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:captcha_timeout:{cid}"),
     )
     # Тип капчи
     b.row(
         InlineKeyboardButton(
-            text=f"Тип капчи: {'пример' if cfg.captcha_type == 'math' else 'кнопка'}",
+            text=f"🧩 Тип капчи: {'пример' if cfg.captcha_type == 'math' else 'кнопка'}",
             callback_data=f"set:captchatype:{cid}",
         )
     )
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"set:refresh:{cid}"))
+    b.row(InlineKeyboardButton(text="‹ Назад", callback_data=f"set:refresh:{cid}"))
     return b.as_markup()
 
 
@@ -246,7 +244,7 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
 
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.autoreact_enabled)} Автореакции",
+            text=f"{_toggle(cfg.autoreact_enabled)} Автореакции",
             callback_data=f"set:toggle:autoreact_enabled:{cid}",
         )
     )
@@ -258,28 +256,27 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(
-            text=f"{_mark(cfg.autoreact_join_custom)} Подхватывать кастом-эмодзи",
+            text=f"{_toggle(cfg.autoreact_join_custom)} Подхватывать кастом-эмодзи",
             callback_data=f"set:toggle:autoreact_join_custom:{cid}",
         )
     )
     b.row(
         InlineKeyboardButton(
-            text=f"⏱ Задержка реакции: {getattr(cfg, 'autoreact_delay', 0)} сек",
+            text=f"⏱ Задержка реакции · {getattr(cfg, 'autoreact_delay', 0)} сек",
             callback_data=f"set:reactdelay:{cid}",
         )
     )
 
-    # Сетка эмодзи по 5 в ряд; выбранные помечаются точкой
+    # Сетка эмодзи по 5 в ряд; выбранные обрамляются скобками-индикатором
     row_buttons = []
     for emoji in REACTION_CHOICES:
-        mark = "•" if emoji in selected else ""
+        text = f"· {emoji} ·" if emoji in selected else emoji
         row_buttons.append(
             InlineKeyboardButton(
-                text=f"{mark}{emoji}",
+                text=text,
                 callback_data=f"set:reactemoji:{emoji}:{cid}",
             )
         )
-    # Раскладываем по 5 кнопок в ряд
     for i in range(0, len(row_buttons), 5):
         b.row(*row_buttons[i : i + 5])
 
@@ -296,8 +293,9 @@ def autoreact_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
         )
     )
 
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"set:refresh:{cid}"))
+    b.row(InlineKeyboardButton(text="‹ Назад", callback_data=f"set:refresh:{cid}"))
     return b.as_markup()
+
 
 WORDS_PER_PAGE = 8
 
@@ -322,7 +320,6 @@ def _list_kb(
     chunk = items[start : start + WORDS_PER_PAGE]
 
     for i, item in enumerate(chunk):
-        # idx — абсолютный индекс в полном списке (для надёжного удаления)
         idx = start + i
         b.row(
             InlineKeyboardButton(
@@ -331,23 +328,16 @@ def _list_kb(
             )
         )
 
-    # Навигация по страницам, если их больше одной
     if pages > 1:
         nav = []
         if page > 0:
             nav.append(
-                InlineKeyboardButton(
-                    text="‹", callback_data=f"set:{kind}s:{page - 1}:{cid}"
-                )
+                InlineKeyboardButton(text="‹", callback_data=f"set:{kind}s:{page - 1}:{cid}")
             )
-        nav.append(
-            InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="set:noop")
-        )
+        nav.append(InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="set:noop"))
         if page < pages - 1:
             nav.append(
-                InlineKeyboardButton(
-                    text="›", callback_data=f"set:{kind}s:{page + 1}:{cid}"
-                )
+                InlineKeyboardButton(text="›", callback_data=f"set:{kind}s:{page + 1}:{cid}")
             )
         b.row(*nav)
 
@@ -359,7 +349,7 @@ def _list_kb(
     )
     b.row(
         InlineKeyboardButton(
-            text="⬅️ Назад к модерации",
+            text="‹ Назад к модерации",
             callback_data=f"set:section:moderation:{cid}",
         )
     )

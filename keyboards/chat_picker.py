@@ -36,7 +36,6 @@ async def build_chat_picker(
     Возвращает (markup, число_доступных).
     """
     selected = selected or set()
-    is_global_admin = user_id in settings.admin_ids
 
     async with session_factory() as session:
         chats = await list_managed_chats(session, only_active=True)
@@ -51,8 +50,9 @@ async def build_chat_picker(
             continue
         if not ch.is_admin:
             continue
-        # Обычный пользователь видит только свои чаты (которые он добавил)
-        if ch.added_by != user_id:
+        # Владелец бота видит все чаты; обычный пользователь — только свои
+        is_global_admin = user_id in settings.admin_ids
+        if not is_global_admin and ch.added_by != user_id:
             continue
 
         title = ch.title or str(ch.chat_id)

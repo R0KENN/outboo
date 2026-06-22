@@ -130,6 +130,33 @@ async def mute_user(
     )
     await log_action(session, chat_id, "mute", actor_id, user_id, reason)
 
+async def unmute_user(
+    bot: Bot,
+    session: AsyncSession,
+    chat_id: int,
+    user_id: int,
+    actor_id: int,
+    reason: str = "",
+) -> None:
+    """Снимает мут: возвращает участнику полный набор прав на отправку."""
+    await bot.restrict_chat_member(
+        chat_id,
+        user_id,
+        permissions=ChatPermissions(
+            can_send_messages=True,
+            can_send_audios=True,
+            can_send_documents=True,
+            can_send_photos=True,
+            can_send_videos=True,
+            can_send_video_notes=True,
+            can_send_voice_notes=True,
+            can_send_polls=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
+        ),
+        use_independent_chat_permissions=True,
+    )
+    await log_action(session, chat_id, "unmute", actor_id, user_id, reason)
 
 async def add_warn(
     bot: Bot,

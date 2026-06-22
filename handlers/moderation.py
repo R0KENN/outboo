@@ -1,5 +1,6 @@
 """Автоматическая модерация входящих сообщений (раздел 4.1)."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -78,7 +79,6 @@ async def moderate_message(
                         cfg.flood_mute_seconds,
                         "flood",
                     )
-                    import asyncio
                     notice = await message.answer(
                         f"{message.from_user.full_name} замучен за флуд."
                     )

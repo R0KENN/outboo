@@ -42,7 +42,10 @@ async def finish_giveaway(bot: Bot, giveaway_id: int) -> None:
     # Выбираем победителей
     if not participants:
         result_text = (
-            f"🎉 <b>Розыгрыш завершён</b>\n\n{title}\n\nУвы, участников не было — победителей нет."
+            "🎁 <b>Розыгрыш завершён</b>\n"
+            "━━━━━━━━━━━━━━\n"
+            f"{title}\n\n"
+            "😔 Участников не было — победителей нет."
         )
         winners = []
     else:
@@ -51,6 +54,15 @@ async def finish_giveaway(bot: Bot, giveaway_id: int) -> None:
         lines = [f"🎉 <b>Розыгрыш завершён!</b>\n\n{title}\n\n🏆 Победители:"]
         for w in winners:
             lines.append(_mention(w.user_id, w.full_name))
+        lines = [
+            "🎉 <b>Розыгрыш завершён!</b>",
+            "━━━━━━━━━━━━━━",
+            f"{title}",
+            "",
+            "🏆 <b>Победители:</b>",
+        ]
+        for i, w in enumerate(winners, 1):
+            lines.append(f"{i}. {_mention(w.user_id, w.full_name)}")
         result_text = "\n".join(lines)
 
     # Публикуем результат в канал/чат, где висел пост
@@ -71,7 +83,8 @@ async def finish_giveaway(bot: Bot, giveaway_id: int) -> None:
     for w in winners:
         try:
             await bot.send_message(
-                w.user_id, f"🎉 Поздравляем! Вы выиграли в розыгрыше:\n<b>{title}</b>"
+                w.user_id,
+                f"🎉 <b>Поздравляем!</b>\nВы выиграли в розыгрыше:\n<b>{title}</b>"
             )
         except Exception:
             pass  # победитель мог не запускать бота в личке

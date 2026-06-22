@@ -89,16 +89,16 @@ def home_kb(user_id: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="🗂 Мои чаты и каналы", callback_data="menu:chats"))
     b.row(
-        InlineKeyboardButton(text="📢 Опубликовать в каналы", callback_data="menu:newpost"),
-        InlineKeyboardButton(text="📋 Очередь", callback_data="menu:queue"),
+        InlineKeyboardButton(text="✏️ Создать пост", callback_data="menu:newpost"),
+        InlineKeyboardButton(text="🗓 Очередь", callback_data="menu:queue"),
     )
-    b.row(InlineKeyboardButton(text="🎉 Конкурс", callback_data="menu:giveaway"))
+    b.row(InlineKeyboardButton(text="🎁 Конкурс", callback_data="menu:giveaway"))
     if _is_global_admin(user_id):
         b.row(
-            InlineKeyboardButton(text="📨 Рассылка", callback_data="menu:broadcast"),
+            InlineKeyboardButton(text="📣 Рассылка", callback_data="menu:broadcast"),
             InlineKeyboardButton(text="👥 Подписчики", callback_data="menu:subs"),
         )
-        b.row(InlineKeyboardButton(text="📊 Экспорт", callback_data="menu:export"))
+        b.row(InlineKeyboardButton(text="📊 Экспорт в таблицы", callback_data="menu:export"))
     b.row(InlineKeyboardButton(text="ℹ️ Помощь", callback_data="menu:help"))
     return b.as_markup()
 
@@ -168,7 +168,9 @@ async def cmd_start(message: Message) -> None:
         pass
 
     await message.answer(
-        "👋 <b>Главное меню</b>\nВыберите раздел:",
+        "✨ <b>Главное меню</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Выберите раздел 👇",
         reply_markup=home_kb(message.from_user.id),
     )
 
@@ -179,7 +181,9 @@ async def cmd_menu(message: Message) -> None:
     if message.chat.type != "private":
         return
     await message.answer(
-        "👋 <b>Главное меню</b>\nВыберите раздел:",
+        "✨ <b>Главное меню</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Выберите раздел 👇",
         reply_markup=home_kb(message.from_user.id),
     )
 
@@ -188,7 +192,9 @@ async def cmd_menu(message: Message) -> None:
 @router.callback_query(F.data == "menu:home")
 async def on_home(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
-        "👋 <b>Главное меню</b>\nВыберите раздел:",
+        "✨ <b>Главное меню</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Выберите раздел 👇",
         reply_markup=home_kb(callback.from_user.id),
     )
     await callback.answer()
@@ -245,8 +251,11 @@ async def on_open_chat(callback: CallbackQuery) -> None:
 
     kb = main_settings_kb(cfg, chat_type)
 
+    admin_warn = "" if (ch and ch.is_admin) else "\n⚠️ <i>Бот не админ — часть функций недоступна.</i>"
     await callback.message.edit_text(
-        f"{icon} <b>{title}</b>\nИндивидуальные настройки {kind}:",
+        f"{icon} <b>{title}</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"Настройки {kind}:{admin_warn}",
         reply_markup=kb,
     )
     await callback.answer()

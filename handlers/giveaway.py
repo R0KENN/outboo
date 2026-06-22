@@ -6,6 +6,7 @@
 """
 
 import logging
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.enums import ChatMemberStatus
@@ -19,12 +20,12 @@ from aiogram.types import (
     Message,
 )
 
+from config import settings
 from database import crud
 from database.engine import session_factory
 from keyboards.chat_picker import build_chat_picker
 from services import giveaway as gv
 from utils.datetime_parse import parse_publish_time, to_local_str
-from config import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="giveaway")
@@ -48,7 +49,7 @@ class NewGiveaway(StatesGroup):
 
 def _cancel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="gv:cancel_fsm")]]
+        inline_keyboard=[[InlineKeyboardButton(text="✕ Отмена", callback_data="gv:cancel_fsm")]]
     )
 
 
@@ -57,7 +58,7 @@ def _participate_kb(giveaway_id: int, count: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=f"🎉 Участвовать ({count})",
+                    text=f"🎁 Участвовать · {count}",
                     callback_data=f"gv:join:{giveaway_id}",
                 )
             ]
@@ -81,16 +82,15 @@ async def cmd_newgiveaway(message: Message, state: FSMContext) -> None:
         show_manual=True,
     )
     # Добавим кнопку «без условия» поверх пикера
-    from aiogram.types import InlineKeyboardButton
-
     kb.inline_keyboard.insert(
         0, [InlineKeyboardButton(text="🚫 Без обязательной подписки", callback_data="gvreq:0")]
     )
 
     await message.answer(
-        "🎯 <b>Создаём конкурс</b>\n\n"
-        "Шаг 1. Канал, подписка на который обязательна для участия.\n"
-        "Выберите канал или «без условия»:",
+        "🎁 <b>Новый конкурс · шаг 1 из 5</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "📢 Канал, подписка на который обязательна для участия.\n"
+        "Выберите канал или «без условия» 👇",
         reply_markup=kb,
     )
 
@@ -117,7 +117,9 @@ async def cb_require_channel(callback: CallbackQuery, state: FSMContext) -> None
         )
     await state.set_state(NewGiveaway.title)
     await callback.message.edit_text(
-        "Шаг 2. Пришлите текст конкурса (что разыгрываем, условия).",
+        "📝 <b>Шаг 2 из 5 · описание</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Пришлите текст конкурса: что разыгрываем, условия и т.п.",
         reply_markup=_cancel_kb(),
     )
     await callback.answer()
@@ -155,7 +157,9 @@ async def step_require_channel(message: Message, state: FSMContext) -> None:
         )
     await state.set_state(NewGiveaway.title)
     await message.answer(
-        "Шаг 2. Пришлите текст конкурса (что разыгрываем, условия и т.п.).",
+        "📝 <b>Шаг 2 из 5 · описание</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Пришлите текст конкурса: что разыгрываем, условия и т.п.",
         reply_markup=_cancel_kb(),
     )
 
@@ -169,7 +173,9 @@ async def step_title(message: Message, state: FSMContext) -> None:
     await state.update_data(title=text)
     await state.set_state(NewGiveaway.winners)
     await message.answer(
-        "Шаг 3. Сколько будет победителей? Пришлите число (например 3).",
+        "🏆 <b>Шаг 3 из 5 · победители</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Сколько будет победителей? Пришлите число, например 3.",
         reply_markup=_cancel_kb(),
     )
 
@@ -183,8 +189,10 @@ async def step_winners(message: Message, state: FSMContext) -> None:
     await state.update_data(winners=int(raw))
     await state.set_state(NewGiveaway.when)
     await message.answer(
-        "Шаг 4. Когда подвести итоги?\n"
-        "Формат: <code>ДД.ММ.ГГГГ ЧЧ:ММ</code> (время МСК), например 31.12.2025 20:00.",
+        "🕓 <b>Шаг 4 из 5 · время итогов</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Когда подвести итоги?\n"
+        "Формат: <code>ДД.ММ.ГГГГ ЧЧ:ММ</code> (МСК), например 31.12.2025 20:00.",
         reply_markup=_cancel_kb(),
     )
 
@@ -206,14 +214,15 @@ async def step_when(message: Message, state: FSMContext) -> None:
         show_manual=True,
     )
     await message.answer(
-        "Шаг 5. Куда опубликовать конкурс? Выберите канал:",
+        "📢 <b>Шаг 5 из 5 · публикация</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "Куда опубликовать конкурс? Выберите канал 👇",
         reply_markup=kb,
     )
 
+
 async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot, created_by: int) -> None:
     """Создаёт конкурс в БД и публикует пост. message — для ответа пользователю."""
-    from datetime import datetime
-
     data = await state.get_data()
     finish_at = datetime.fromisoformat(data["finish_at"])
 
@@ -225,16 +234,18 @@ async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot, cre
             require_channel_id=data.get("require_channel_id", 0),
             require_channel_title=data.get("require_channel_title", ""),
             finish_at=finish_at,
-            created_by=created_by
+            created_by=created_by,
         )
 
     cond = ""
     if data.get("require_channel_id"):
-        cond = f"\n\n📌 Условие: подписка на {data['require_channel_title']}"
+        cond = f"\n\n📌 Условие: подписка на <b>{data['require_channel_title']}</b>"
     post_text = (
+        f"🎁 <b>Розыгрыш</b>\n"
+        f"━━━━━━━━━━━━━━\n"
         f"{data['title']}{cond}\n\n"
-        f"🏆 Победителей: {data['winners']}\n"
-        f"⏰ Итоги: {to_local_str(finish_at)} (МСК)"
+        f"🏆 Победителей: <b>{data['winners']}</b>\n"
+        f"🕓 Итоги: <b>{to_local_str(finish_at)}</b> (МСК)"
     )
     sent = await bot.send_message(chat.id, post_text, reply_markup=_participate_kb(g.id, 0))
     async with session_factory() as session:
@@ -243,9 +254,11 @@ async def _finalize_giveaway(message: Message, state: FSMContext, chat, bot, cre
 
     await state.clear()
     await message.answer(
-        f"✅ Конкурс #{g.id} опубликован в <b>{chat.title or chat.id}</b>.\n"
-        f"Итоги в {to_local_str(finish_at)} (МСК).\n\n"
-        f"Досрочно: /endgiveaway {g.id}"
+        f"✅ <b>Конкурс #{g.id} опубликован</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"Канал: <b>{chat.title or chat.id}</b>\n"
+        f"Итоги: <b>{to_local_str(finish_at)}</b> (МСК)\n\n"
+        f"Завершить досрочно: /endgiveaway {g.id}"
     )
 
 
@@ -297,6 +310,7 @@ async def step_post_channel(message: Message, state: FSMContext) -> None:
         return
     await _finalize_giveaway(message, state, chat, message.bot, created_by=message.from_user.id)
 
+
 @router.message(Command("endgiveaway"))
 async def cmd_endgiveaway(message: Message) -> None:
     """Досрочное завершение конкурса по id."""
@@ -304,7 +318,7 @@ async def cmd_endgiveaway(message: Message) -> None:
         return
     parts = (message.text or "").split()
     if len(parts) < 2 or not parts[1].isdigit():
-        await message.answer("Формат: /endgiveaway <id>")
+        await message.answer("Формат: /endgiveaway &lt;id&gt;")
         return
     giveaway_id = int(parts[1])
     # Снимаем таймер, чтобы не сработал повторно
