@@ -163,26 +163,45 @@ async def _react_range(
     from_id: int,
     to_id: int,
     emojis: list[str],
+    clear: bool = False,
 ) -> None:
-    """Ставит реакции на диапазон постов канала с живым прогрессом."""
+    """Ставит или снимает реакции на диапазон постов канала с живым прогрессом.
+
+    clear=True — отправляет пустую реакцию, что убирает реакцию бота с поста.
+    """
     total = to_id - from_id + 1
-    progress = await message.answer(
-        f"⏳ Ставлю реакции на посты #{from_id}–#{to_id} (всего {total})…"
-    )
+    if clear:
+        progress = await message.answer(
+            f"⏳ Убираю реакции с постов #{from_id}–#{to_id} (всего {total})…"
+        )
+    else:
+        progress = await message.answer(
+            f"⏳ Ставлю реакции на посты #{from_id}–#{to_id} (всего {total})…"
+        )
 
     ok = 0
     fail = 0
     done = 0
     for mid in range(from_id, to_id + 1):
-        chosen = random.choice(emojis)
-        result = await safe_call(
-            lambda m=mid, e=chosen: bot.set_message_reaction(
-                chat_id=chat_id,
-                message_id=m,
-                reaction=[ReactionTypeEmoji(emoji=e)],
-            ),
-            delay=0.2,
-        )
+        if clear:
+            result = await safe_call(
+                lambda m=mid: bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=m,
+                    reaction=[],
+                ),
+                delay=0.2,
+            )
+        else:
+            chosen = random.choice(emojis)
+            result = await safe_call(
+                lambda m=mid, e=chosen: bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=m,
+                    reaction=[ReactionTypeEmoji(emoji=e)],
+                ),
+                delay=0.2,
+            )
         if result is not None:
             ok += 1
         else:
@@ -198,11 +217,18 @@ async def _react_range(
             except Exception:
                 pass
 
-    await progress.edit_text(
-        f"✅ <b>Готово.</b>\n"
-        f"Поставлено: <b>{ok}</b>\n"
-        f"Пропущено (нет поста / нельзя реагировать): <b>{fail}</b>"
-    )
+    if clear:
+        await progress.edit_text(
+            f"✅ <b>Готово.</b>\n"
+            f"Очищено постов: <b>{ok}</b>\n"
+            f"Пропущено (нет поста / нечего убирать): <b>{fail}</b>"
+        )
+    else:
+        await progress.edit_text(
+            f"✅ <b>Готово.</b>\n"
+            f"Поставлено: <b>{ok}</b>\n"
+            f"Пропущено (нет поста / нельзя реагировать): <b>{fail}</b>"
+        )
 
 @router.message(Command("reactrange"))
 async def cmd_reactrange(message: Message, bot: Bot) -> None:
@@ -256,6 +282,7 @@ async def cmd_reactrange(message: Message, bot: Bot) -> None:
 
 class ReactRangeFSM(StatesGroup):
     waiting_range = State()
+    waiting_clear_range = State()
 
 
 @router.callback_query(F.data.startswith("react:oldposts:"))
@@ -281,8 +308,31 @@ async def cb_react_oldposts(callback: CallbackQuery, state: FSMContext) -> None:
     )
     await callback.answer()
 
+@router.callback_query(F.data.startswith("react:delposts:"))
+async def cb_del_oldposts(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопка «Удалить реакции бота»: просим прислать диапазон id."""
+    chat_id = int(callback.data.split(":")[2])
+    if not await _is_channel_admin(callback.bot, chat_id, callback.from_user.id):
+        await callback.answer("Только для администраторов канала.", show_alert=True)
+        return
 
-@router.callback_query(ReactRangeFSM.waiting_range, F.data == "react:cancel")
+    await state.set_state(ReactRangeFSM.waiting_clear_range)
+    await state.update_data(react_chat_id=chat_id)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Отмена", callback_data="react:cancel")]]
+    )
+    await callback.message.edit_text(
+        "🧹 <b>Удаление реакций бота</b>\n\n"
+        "Пришлите диапазон id постов через пробел: <code>from to</code>\n"
+        "Например: <code>100 250</code>\n\n"
+        "С каждого поста в диапазоне будет снята реакция, поставленная ботом.\n"
+        "id поста виден в его ссылке: t.me/канал/<b>123</b> → id = 123.\n"
+        "За раз — не больше 500 постов.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "react:cancel")
 async def cb_react_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text("Отменено.")
@@ -324,3 +374,28 @@ async def step_react_range(message: Message, bot: Bot, state: FSMContext) -> Non
         return
 
     await _react_range(bot, message, chat_id, from_id, to_id, emojis=emojis)
+
+@router.message(ReactRangeFSM.waiting_clear_range)
+async def step_clear_range(message: Message, bot: Bot, state: FSMContext) -> None:
+    """Принимает диапазон и снимает реакции бота с постов."""
+    parts = (message.text or "").split()
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        await message.answer("Нужно два числа через пробел, например: 100 250")
+        return
+
+    from_id, to_id = int(parts[0]), int(parts[1])
+    if from_id > to_id:
+        from_id, to_id = to_id, from_id
+    if to_id - from_id > 500:
+        await message.answer("За раз не больше 500 постов. Сузьте диапазон.")
+        return
+
+    data = await state.get_data()
+    chat_id = data.get("react_chat_id")
+    await state.clear()
+
+    if not chat_id:
+        await message.answer("Потерял канал. Откройте настройки канала заново.")
+        return
+
+    await _react_range(bot, message, chat_id, from_id, to_id, emojis=[], clear=True)
