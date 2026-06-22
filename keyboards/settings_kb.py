@@ -52,7 +52,7 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
         )
         b.row(
             InlineKeyboardButton(
-                text=f"@-упоминания каналов: {'блок' if cfg.block_mentions else 'разрешены'}",
+                text=f"@-упоминания: {'блок' if cfg.block_mentions else 'разрешены'}",
                 callback_data=f"set:toggle:block_mentions:{cfg.chat_id}",
             )
         )
@@ -138,6 +138,15 @@ def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="➖", callback_data=f"set:dec:flood_seconds:{cid}"),
         InlineKeyboardButton(text=f"за {cfg.flood_seconds} сек.", callback_data="set:noop"),
         InlineKeyboardButton(text="➕", callback_data=f"set:inc:flood_seconds:{cid}"),
+    )
+        # Срок мута за флуд / по лимиту варнов (в минутах на кнопке)
+    b.row(
+        InlineKeyboardButton(text="➖", callback_data=f"set:dec:flood_mute_seconds:{cid}"),
+        InlineKeyboardButton(
+            text=f"Мут за нарушение: {cfg.flood_mute_seconds // 60} мин.",
+            callback_data="set:noop",
+        ),
+        InlineKeyboardButton(text="➕", callback_data=f"set:inc:flood_mute_seconds:{cid}"),
     )
     # Таймаут капчи
     b.row(

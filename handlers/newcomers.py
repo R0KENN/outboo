@@ -25,7 +25,19 @@ async def _restrict(bot, chat_id: int, user_id: int) -> None:
     await bot.restrict_chat_member(
         chat_id,
         user_id,
-        permissions=ChatPermissions(can_send_messages=False),
+        permissions=ChatPermissions(
+            can_send_messages=False,
+            can_send_audios=False,
+            can_send_documents=False,
+            can_send_photos=False,
+            can_send_videos=False,
+            can_send_video_notes=False,
+            can_send_voice_notes=False,
+            can_send_polls=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False,
+        ),
+        use_independent_chat_permissions=True,
     )
 
 

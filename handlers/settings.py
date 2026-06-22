@@ -30,12 +30,14 @@ LIMITS = {
     "flood_messages": (2, 30),
     "flood_seconds": (1, 60),
     "captcha_timeout": (30, 600),
+    "flood_mute_seconds": (60, 86400),
 }
 STEP = {
     "warn_limit": 1,
     "flood_messages": 1,
     "flood_seconds": 1,
     "captcha_timeout": 30,
+    "flood_mute_seconds": 300,
 }
 
 

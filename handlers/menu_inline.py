@@ -244,16 +244,6 @@ async def on_open_chat(callback: CallbackQuery) -> None:
     kind = "канала" if chat_type == "channel" else "чата"
 
     kb = main_settings_kb(cfg, chat_type)
-    # Для каналов добавляем кнопку с реферальной ссылкой набора подписчиков
-    if chat_type == "channel":
-        b = InlineKeyboardBuilder.from_markup(kb)
-        b.row(
-            InlineKeyboardButton(
-                text="🔗 Ссылка для набора подписчиков",
-                callback_data=f"menu:reflink:{chat_id}",
-            )
-        )
-        kb = b.as_markup()
 
     await callback.message.edit_text(
         f"{icon} <b>{title}</b>\nИндивидуальные настройки {kind}:",
