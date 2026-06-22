@@ -43,64 +43,28 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
             )
         )
     else:
-        # ── Настройки ГРУППЫ ──
+        # ── Настройки ГРУППЫ: разделы ──
         b.row(
             InlineKeyboardButton(
-                text=f"{_mark(cfg.antispam_enabled)} Антиспам",
-                callback_data=f"set:toggle:antispam_enabled:{cid}",
+                text="🛡 Модерация",
+                callback_data=f"set:section:moderation:{cid}",
             )
         )
         b.row(
             InlineKeyboardButton(
-                text=f"@-упоминания: {'блок' if cfg.block_mentions else 'разрешены'}",
-                callback_data=f"set:toggle:block_mentions:{cfg.chat_id}",
+                text="👋 Новички и приветствие",
+                callback_data=f"set:section:newcomers:{cid}",
             )
         )
         b.row(
             InlineKeyboardButton(
-                text=f"{_mark(cfg.antimat_enabled)} Антимат",
-                callback_data=f"set:toggle:antimat_enabled:{cid}",
+                text="🧹 Чистка и заявки",
+                callback_data=f"set:section:cleanup:{cid}",
             )
         )
         b.row(
             InlineKeyboardButton(
-                text=f"{_mark(cfg.antiflood_enabled)} Антифлуд",
-                callback_data=f"set:toggle:antiflood_enabled:{cid}",
-            )
-        )
-        b.row(
-            InlineKeyboardButton(
-                text=f"{_mark(cfg.captcha_enabled)} Капча для новичков",
-                callback_data=f"set:toggle:captcha_enabled:{cid}",
-            )
-        )
-        b.row(
-            InlineKeyboardButton(
-                text=f"{_mark(cfg.welcome_enabled)} Приветствие",
-                callback_data=f"set:toggle:welcome_enabled:{cid}",
-            )
-        )
-        b.row(
-            InlineKeyboardButton(
-                text=f"{_mark(cfg.clean_service_msgs)} Чистить служебные",
-                callback_data=f"set:toggle:clean_service_msgs:{cid}",
-            )
-        )
-        b.row(
-            InlineKeyboardButton(
-                text=f"{_mark(cfg.quarantine_enabled)} Карантин новичков",
-                callback_data=f"set:toggle:quarantine_enabled:{cid}",
-            )
-        )
-        b.row(
-            InlineKeyboardButton(
-                text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
-                callback_data=f"set:toggle:autoapprove_enabled:{cid}",
-            )
-        )
-        b.row(
-            InlineKeyboardButton(
-                text=f"⚙️ Параметры (порог варнов: {cfg.warn_limit})",
+                text=f"⚙️ Числовые параметры (порог варнов: {cfg.warn_limit})",
                 callback_data=f"set:params:{cid}",
             )
         )
@@ -108,6 +72,99 @@ def main_settings_kb(cfg: ChatSettings, chat_type: str = "group") -> InlineKeybo
     b.row(InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:home"))
     return b.as_markup()
 
+def _back_root_row(b: InlineKeyboardBuilder, cid: int) -> None:
+    """Общая строка «Назад» к корню настроек группы."""
+    b.row(InlineKeyboardButton(text="⬅️ Назад к разделам", callback_data=f"set:refresh:{cid}"))
+
+
+def section_moderation_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
+    """Раздел модерации: антиспам, упоминания, мат, флуд."""
+    cid = cfg.chat_id
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.antispam_enabled)} Антиспам (ссылки, пересылы)",
+            callback_data=f"set:toggle:antispam_enabled:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"@-упоминания: {'блок' if cfg.block_mentions else 'разрешены'}",
+            callback_data=f"set:toggle:block_mentions:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.antimat_enabled)} Антимат (удаляет + варн)",
+            callback_data=f"set:toggle:antimat_enabled:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.antiflood_enabled)} Антифлуд (мут за частые сообщения)",
+            callback_data=f"set:toggle:antiflood_enabled:{cid}",
+        )
+    )
+    _back_root_row(b, cid)
+    return b.as_markup()
+
+
+def section_newcomers_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
+    """Раздел новичков: капча, приветствие, правила, карантин."""
+    cid = cfg.chat_id
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.captcha_enabled)} Капча для новичков",
+            callback_data=f"set:toggle:captcha_enabled:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.welcome_enabled)} Приветствие",
+            callback_data=f"set:toggle:welcome_enabled:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="✏️ Текст приветствия",
+            callback_data=f"set:welcometext:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="📜 Правила чата",
+            callback_data=f"set:rulestext:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.quarantine_enabled)} Карантин новичков",
+            callback_data=f"set:toggle:quarantine_enabled:{cid}",
+        )
+    )
+    _back_root_row(b, cid)
+    return b.as_markup()
+
+
+def section_cleanup_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
+    """Раздел чистки и заявок."""
+    cid = cfg.chat_id
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.clean_service_msgs)} Чистить служебные сообщения",
+            callback_data=f"set:toggle:clean_service_msgs:{cid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"{_mark(cfg.autoapprove_enabled)} Автоприём заявок",
+            callback_data=f"set:toggle:autoapprove_enabled:{cid}",
+        )
+    )
+    _back_root_row(b, cid)
+    return b.as_markup()
 
 def params_kb(cfg: ChatSettings) -> InlineKeyboardMarkup:
     """Меню числовых параметров с кнопками +/-."""

@@ -15,13 +15,27 @@ from aiogram.fsm.state import State, StatesGroup
 
 from database.crud import get_managed_chat, get_or_create_chat_settings
 from database.engine import session_factory
-from keyboards.settings_kb import autoreact_kb, main_settings_kb, params_kb
+from keyboards.settings_kb import (
+    autoreact_kb,
+    main_settings_kb,
+    params_kb,
+    section_cleanup_kb,
+    section_moderation_kb,
+    section_newcomers_kb,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="settings")
 
 
 class JoinWelcomeFSM(StatesGroup):
+    text = State()
+
+class WelcomeFSM(StatesGroup):
+    text = State()
+
+
+class RulesFSM(StatesGroup):
     text = State()
 
 # Границы значений, чтобы кнопками нельзя было выставить абсурд
@@ -38,6 +52,25 @@ STEP = {
     "flood_seconds": 1,
     "captcha_timeout": 30,
     "flood_mute_seconds": 300,
+}
+# К какому разделу относится каждое булево поле — чтобы после переключения
+# остаться в том же подменю.
+FIELD_SECTION = {
+    "antispam_enabled": "moderation",
+    "block_mentions": "moderation",
+    "antimat_enabled": "moderation",
+    "antiflood_enabled": "moderation",
+    "captcha_enabled": "newcomers",
+    "welcome_enabled": "newcomers",
+    "quarantine_enabled": "newcomers",
+    "clean_service_msgs": "cleanup",
+    "autoapprove_enabled": "cleanup",
+}
+
+SECTION_KB = {
+    "moderation": section_moderation_kb,
+    "newcomers": section_newcomers_kb,
+    "cleanup": section_cleanup_kb,
 }
 
 
@@ -66,7 +99,17 @@ async def cmd_settings(message: Message) -> None:
     async with session_factory() as session:
         cfg = await get_or_create_chat_settings(session, message.chat.id)
         kb = main_settings_kb(cfg, message.chat.type)
-    await message.answer("⚙️ <b>Настройки чата</b>\nНажмите, чтобы переключить:", reply_markup=kb)
+    await message.answer(
+        "⚙️ <b>Настройки чата</b>\n\n"
+        "✅ — функция включена, ❌ — выключена. Нажмите на кнопку, чтобы переключить.\n\n"
+        "• <b>Антиспам</b> — удаляет ссылки и пересланные сообщения\n"
+        "• <b>Антимат</b> — удаляет мат и выдаёт варн\n"
+        "• <b>Антифлуд</b> — мутит за частые сообщения\n"
+        "• <b>Капча</b> — проверка новичков на входе\n"
+        "• <b>Приветствие</b> и <b>Правила</b> — текст для новых участников\n"
+        "• <b>Параметры</b> — числовые пороги (варны, флуд, капча)",
+        reply_markup=kb,
+    )
 
 
 @router.callback_query(F.data.startswith("set:"))
@@ -95,6 +138,38 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    if action == "welcometext":
+        chat_id = int(parts[-1])
+        if not await _is_admin(callback, chat_id, callback.from_user.id):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        await state.set_state(WelcomeFSM.text)
+        await state.update_data(chat_id=chat_id)
+        await callback.message.answer(
+            "✏️ Пришлите новый текст приветствия для новичков.\n"
+            "Можно использовать {name} — подставится имя пользователя.\n"
+            "Форматирование (жирный, курсив, ссылки) сохранится.\n\n"
+            "Для отмены отправьте /cancel"
+        )
+        await callback.answer()
+        return
+
+    if action == "rulestext":
+        chat_id = int(parts[-1])
+        if not await _is_admin(callback, chat_id, callback.from_user.id):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        await state.set_state(RulesFSM.text)
+        await state.update_data(chat_id=chat_id)
+        await callback.message.answer(
+            "📜 Пришлите текст правил чата.\n"
+            "Он будет добавляться к приветствию новичков.\n"
+            "Форматирование сохранится.\n\n"
+            "Для отмены отправьте /cancel"
+        )
+        await callback.answer()
+        return
+
     # Последний элемент callback_data — всегда chat_id
     chat_id = int(parts[-1])
     # Тип чата нужен для правильного набора кнопок настроек
@@ -118,6 +193,10 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
             # Реакционные тумблеры остаются в подменю автореакций
             if field in ("autoreact_enabled", "autoreact_join_custom"):
                 await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
+            elif field in FIELD_SECTION:
+                # Остаёмся в том же разделе группы
+                kb_func = SECTION_KB[FIELD_SECTION[field]]
+                await callback.message.edit_reply_markup(reply_markup=kb_func(cfg))
             else:
                 await callback.message.edit_reply_markup(
                     reply_markup=main_settings_kb(cfg, chat_type)
@@ -189,6 +268,12 @@ async def on_settings_callback(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_reply_markup(reply_markup=autoreact_kb(cfg))
             await callback.answer(f"Набор: {cfg.autoreact_emojis or 'пусто'}")
 
+        elif action == "section":
+            section = parts[2]
+            kb_func = SECTION_KB.get(section)
+            if kb_func:
+                await callback.message.edit_reply_markup(reply_markup=kb_func(cfg))
+            await callback.answer()
         elif action == "params":
             await callback.message.edit_reply_markup(reply_markup=params_kb(cfg))
             await callback.answer()
@@ -224,6 +309,57 @@ async def join_welcome_save(message: Message, state: FSMContext) -> None:
         cfg.join_welcome_enabled = True
         await session.commit()
     await message.answer("✅ Текст приветствия в ЛС сохранён и включён.")
+    
+@router.message(WelcomeFSM.text, Command("cancel"))
+async def welcome_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Отменено.")
+
+
+@router.message(WelcomeFSM.text)
+async def welcome_save(message: Message, state: FSMContext) -> None:
+    """Сохраняет текст приветствия группы, введённый через кнопку."""
+    data = await state.get_data()
+    chat_id = data.get("chat_id")
+    await state.clear()
+
+    text = (message.html_text or "").strip()
+    if not text:
+        await message.answer("Пустой текст — ничего не сохранил. Попробуйте ещё раз.")
+        return
+
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, chat_id)
+        cfg.welcome_text = text
+        cfg.welcome_enabled = True
+        await session.commit()
+    await message.answer("✅ Текст приветствия сохранён и включён.")
+
+
+@router.message(RulesFSM.text, Command("cancel"))
+async def rules_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Отменено.")
+
+
+@router.message(RulesFSM.text)
+async def rules_save(message: Message, state: FSMContext) -> None:
+    """Сохраняет текст правил, введённый через кнопку."""
+    data = await state.get_data()
+    chat_id = data.get("chat_id")
+    await state.clear()
+
+    text = (message.html_text or "").strip()
+    if not text:
+        await message.answer("Пустой текст — ничего не сохранил. Попробуйте ещё раз.")
+        return
+
+    async with session_factory() as session:
+        cfg = await get_or_create_chat_settings(session, chat_id)
+        cfg.rules_text = text
+        await session.commit()
+    await message.answer("✅ Правила сохранены.")
+
 
 @router.message(Command("setwelcome"))
 async def cmd_set_welcome(message: Message) -> None:
