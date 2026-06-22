@@ -36,6 +36,17 @@ logger = logging.getLogger(__name__)
 router = Router(name="posting")
 
 
+def _as_user_message(callback, message):
+    """Возвращает message с from_user реального пользователя (не бота)."""
+    msg = message.model_copy(update={"from_user": callback.from_user})
+    if msg.from_user is None or msg.from_user.id != callback.from_user.id:
+        try:
+            object.__setattr__(msg, "from_user", callback.from_user)
+        except Exception:
+            pass
+    return msg
+
+
 class NewPost(StatesGroup):
     """Шаги диалога создания поста."""
 
