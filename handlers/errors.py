@@ -7,6 +7,7 @@
 - остальное — логируем со стеком, чтобы процесс не падал.
 """
 
+import html
 import logging
 
 from aiogram import Router
@@ -16,6 +17,8 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
 )
 from aiogram.types import ErrorEvent
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="errors")
@@ -44,4 +47,19 @@ async def on_error(event: ErrorEvent) -> bool:
 
     # Всё остальное — логируем со стеком, но не роняем бота
     logger.exception("Необработанная ошибка в апдейте: %s", exc)
+
+    # Дополнительно шлём короткий алерт владельцу, чтобы узнать о сбое
+    # у клиента раньше, чем он сам напишет (основа платной поддержки).
+    if settings.alert_chat_id:
+        try:
+            bot = event.update.bot
+            text = (
+                "⚠️ <b>Критическая ошибка бота</b>\n"
+                f"<code>{html.escape(type(exc).__name__)}: "
+                f"{html.escape(str(exc))[:500]}</code>"
+            )
+            await bot.send_message(settings.alert_chat_id, text)
+        except Exception as alert_err:
+            logger.warning("Не удалось отправить алерт: %s", alert_err)
+
     return True

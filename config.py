@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     throttle_rate: float = Field(default=0.7, alias="THROTTLE_RATE")
     auto_init_db: bool = Field(default=True, alias="AUTO_INIT_DB")
 
+    # Список включённых модулей через запятую — управляет сборкой под пакет.
+    # Пусто = включить все модули (режим демо / премиум).
+    enabled_modules: str = Field(default="", alias="ENABLED_MODULES")
+
+    # ID чата/пользователя для алертов о критических ошибках (обычно твой личный).
+    alert_chat_id: int = Field(default=0, alias="ALERT_CHAT_ID")
+
     bot_admins: str = Field(default="", alias="BOT_ADMINS")
 
     google_creds_path: str = Field(default="", alias="GOOGLE_CREDS_PATH")
@@ -49,6 +56,15 @@ class Settings(BaseSettings):
             int(x)
             for x in self.bot_admins.replace(" ", "").split(",")
             if x.strip().isdigit()
+        }
+
+    @property
+    def modules(self) -> set[str]:
+        """Множество включённых модулей. Пусто в .env = все модули."""
+        return {
+            m.strip().lower()
+            for m in self.enabled_modules.split(",")
+            if m.strip()
         }
 
     @property
